@@ -13,54 +13,155 @@ import { mockStreamer, mockEvents } from '../data/mock';
       <h1>ChatControl</h1>
     </div>
 
-    <div class="status-grid">
-      <div class="status-card">
-        <div class="status-row">
-          <span class="status-label">Streamer</span>
-          <span class="status-value">{mockStreamer.displayName}</span>
-        </div>
-      </div>
-      <div class="status-card">
-        <div class="status-row">
-          <span class="status-label">Twitch</span>
-          <span class={`status-indicator ${mockStreamer.twitchConnected ? 'connected' : 'disconnected'}`}>
-            <span class="dot"></span>
-            {mockStreamer.twitchConnected ? 'Conectado' : 'Desconectado'}
-          </span>
-        </div>
-        <div class="status-detail">@{mockStreamer.twitchUsername}</div>
-      </div>
-      <div class="status-card">
-        <div class="status-row">
-          <span class="status-label">Minecraft</span>
-          <span class={`status-indicator ${mockStreamer.minecraftConnected ? 'connected' : 'disconnected'}`}>
-            <span class="dot"></span>
-            {mockStreamer.minecraftConnected ? 'Conectado' : 'Desconectado'}
-          </span>
-        </div>
-        <div class="status-detail">{mockStreamer.minecraftUsername}</div>
-      </div>
+    <div id="loading" class="loading-state">
+      <p>Cargando datos...</p>
     </div>
 
-    <section class="events-section">
-      <div class="section-header">
-        <h2>Eventos</h2>
-        <span class="event-count">{mockEvents.filter(e => e.enabled).length} activos</span>
-      </div>
-      <div class="events-grid">
-        {mockEvents.map(event => (
-          <EventCard event={event} editable={true} />
-        ))}
-      </div>
-    </section>
+    <div id="error" class="error-state" style="display:none;">
+      <p>No se pudo conectar al backend.</p>
+      <button id="retry-btn">Reintentar</button>
+    </div>
 
-    <div class="api-notice">
-      <p>Datos mock — El backend real se implementará en una fase posterior.</p>
-      <p>API futura: <code>GET /api/events</code> · <code>PUT /api/events/:id</code></p>
+    <div id="demo-banner" class="api-notice" style="display:none;">
+      <p>Datos de demostración — Backend no disponible.</p>
+    </div>
+
+    <div id="dashboard-content" style="display:none;">
+      <div class="status-grid">
+        <div class="status-card">
+          <div class="status-row">
+            <span class="status-label">Streamer</span>
+            <span class="status-value" id="display-name">-</span>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="status-row">
+            <span class="status-label">Twitch</span>
+            <span class="status-indicator connected" id="twitch-status">
+              <span class="dot"></span>
+              Conectado
+            </span>
+          </div>
+          <div class="status-detail" id="twitch-login">@-</div>
+        </div>
+        <div class="status-card">
+          <div class="status-row">
+            <span class="status-label">Minecraft</span>
+            <span class="status-indicator disconnected" id="mc-status">
+              <span class="dot"></span>
+              Sin jugador
+            </span>
+          </div>
+          <div class="status-detail" id="mc-player">-</div>
+        </div>
+      </div>
+
+      <section class="events-section">
+        <div class="section-header">
+          <h2>Eventos</h2>
+          <span class="event-count" id="active-count">0 activos</span>
+        </div>
+        <div class="events-grid" id="events-grid">
+        </div>
+      </section>
     </div>
   </main>
   <Footer />
 </Layout>
+
+<script>
+  import { getMe, getEvents, logout } from '../lib/api';
+  import { mockStreamer, mockEvents } from '../data/mock';
+
+  const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:5000';
+  const BASE = import.meta.env.BASE_URL || '/';
+
+  const loadingEl = document.getElementById('loading')!;
+  const errorEl = document.getElementById('error')!;
+  const demoBanner = document.getElementById('demo-banner')!;
+  const contentEl = document.getElementById('dashboard-content')!;
+  const retryBtn = document.getElementById('retry-btn')!;
+
+  function showDemoMode() {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'none';
+    demoBanner.style.display = 'block';
+    contentEl.style.display = 'block';
+    document.getElementById('display-name')!.textContent = mockStreamer.displayName;
+    document.getElementById('twitch-login')!.textContent = '@' + mockStreamer.twitchUsername;
+    document.getElementById('mc-player')!.textContent = mockStreamer.minecraftUsername;
+    const grid = document.getElementById('events-grid')!;
+    grid.innerHTML = mockEvents.map(e => `
+      <div class="event-card ${!e.enabled ? 'disabled' : ''}">
+        <div class="event-header">
+          <span class="event-number">${e.id}</span>
+          <span class="event-name">${e.name}</span>
+          <span class="event-status ${e.enabled ? 'active' : 'inactive'}">${e.enabled ? 'Activo' : 'Inactivo'}</span>
+        </div>
+        <div class="event-details">
+          <div class="event-detail"><span class="detail-label">Cooldown</span><span class="detail-value">${e.cooldown}s</span></div>
+          ${Object.entries(e.params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${k}</span><span class="detail-value">${v}</span></div>`).join('')}
+        </div>
+      </div>
+    `).join('');
+    document.getElementById('active-count')!.textContent = mockEvents.filter(e => e.enabled).length + ' activos';
+  }
+
+  async function loadDashboard() {
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+    demoBanner.style.display = 'none';
+    contentEl.style.display = 'none';
+
+    try {
+      const me = await getMe();
+      const events = await getEvents();
+      loadingEl.style.display = 'none';
+      contentEl.style.display = 'block';
+
+      document.getElementById('display-name')!.textContent = me.display_name;
+      document.getElementById('twitch-login')!.textContent = '@' + me.twitch_login;
+      document.getElementById('mc-player')!.textContent = me.minecraft_player || 'Sin jugador configurado';
+
+      const mcStatus = document.getElementById('mc-status')!;
+      if (me.minecraft_player) {
+        mcStatus.className = 'status-indicator connected';
+        mcStatus.innerHTML = '<span class="dot"></span> Conectado';
+      }
+
+      const activeEvents = events.filter(e => e.enabled);
+      document.getElementById('active-count')!.textContent = activeEvents.length + ' activos';
+
+      const grid = document.getElementById('events-grid')!;
+      grid.innerHTML = events.map(e => {
+        const params = typeof e.params === 'string' ? JSON.parse(e.params) : e.params;
+        return `
+          <div class="event-card ${!e.enabled ? 'disabled' : ''}">
+            <div class="event-header">
+              <span class="event-number">${e.event_number}</span>
+              <span class="event-name">${e.display_name || e.action}</span>
+              <span class="event-status ${e.enabled ? 'active' : 'inactive'}">${e.enabled ? 'Activo' : 'Inactivo'}</span>
+            </div>
+            <div class="event-details">
+              <div class="event-detail"><span class="detail-label">Cooldown</span><span class="detail-value">${e.cooldown}s</span></div>
+              ${Object.entries(params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${k}</span><span class="detail-value">${v}</span></div>`).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    } catch (err: any) {
+      if (err.message === 'NOT_AUTHENTICATED') {
+        window.location.href = BASE + 'login/';
+        return;
+      }
+      showDemoMode();
+    }
+  }
+
+  retryBtn?.addEventListener('click', loadDashboard);
+  loadDashboard();
+</script>
 
 <style>
   .dashboard {

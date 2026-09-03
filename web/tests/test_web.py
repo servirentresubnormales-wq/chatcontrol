@@ -239,6 +239,10 @@ class TestWebAppWithUser(unittest.TestCase):
         with self.client.session_transaction() as sess:
             sess["session_id"] = "valid_session"
 
+    def _get_csrf(self):
+        resp = self.client.get("/api/csrf-token")
+        return json.loads(resp.data)["csrf_token"]
+
     def test_dashboard_with_session(self):
         self._login()
         resp = self.client.get("/dashboard")
@@ -262,12 +266,21 @@ class TestWebAppWithUser(unittest.TestCase):
 
     def test_api_update_settings(self):
         self._login()
+        csrf = self._get_csrf()
         resp = self.client.put("/api/settings",
             data=json.dumps({"minecraft_player": "MyMC"}),
-            content_type="application/json")
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertTrue(data["success"])
+
+    def test_api_update_settings_no_csrf(self):
+        self._login()
+        resp = self.client.put("/api/settings",
+            data=json.dumps({"minecraft_player": "MyMC"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
 
     def test_api_get_events(self):
         self._login()
@@ -290,19 +303,30 @@ class TestWebAppWithUser(unittest.TestCase):
 
     def test_api_update_event(self):
         self._login()
+        csrf = self._get_csrf()
+        resp = self.client.put("/api/events/1",
+            data=json.dumps({"cooldown": 25}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_api_update_event_no_csrf(self):
+        self._login()
         resp = self.client.put("/api/events/1",
             data=json.dumps({"cooldown": 25}),
             content_type="application/json")
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 403)
 
     def test_api_batch_update_events(self):
         self._login()
+        csrf = self._get_csrf()
         resp = self.client.put("/api/events/batch",
             data=json.dumps({"events": [
                 {"event_number": 1, "enabled": False},
                 {"event_number": 2, "cooldown": 30},
             ]}),
-            content_type="application/json")
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
         self.assertEqual(resp.status_code, 200)
         data = json.loads(resp.data)
         self.assertTrue(data["success"])
@@ -310,8 +334,27 @@ class TestWebAppWithUser(unittest.TestCase):
 
     def test_logout(self):
         self._login()
+        csrf = self._get_csrf()
+        resp = self.client.post("/logout",
+            data=json.dumps({}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["success"])
+
+    def test_logout_no_csrf(self):
+        self._login()
         resp = self.client.post("/logout")
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_csrf_token_endpoint(self):
+        self._login()
+        resp = self.client.get("/api/csrf-token")
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertIn("csrf_token", data)
+        self.assertTrue(len(data["csrf_token"]) > 20)
 
     def test_authorization_isolation(self):
         Streamer(self.db_path).get_or_create("99999", "otheruser", "OtherUser")
@@ -324,6 +367,28 @@ class TestWebAppWithUser(unittest.TestCase):
         resp = self.client.get("/api/me")
         data = json.loads(resp.data)
         self.assertEqual(data["twitch_user_id"], "12345")
+
+    def test_event_update_validates_cooldown(self):
+        self._login()
+        csrf = self._get_csrf()
+        resp = self.client.put("/api/events/1",
+            data=json.dumps({"cooldown": -5}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+        event = EventSettings(self.db_path).get("12345", 1)
+        self.assertEqual(event["cooldown"], 0)
+
+    def test_event_update_validates_enabled_type(self):
+        self._login()
+        csrf = self._get_csrf()
+        resp = self.client.put("/api/events/1",
+            data=json.dumps({"enabled": "yes"}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+        event = EventSettings(self.db_path).get("12345", 1)
+        self.assertEqual(event["enabled"], 0)
 
 
 class TestTwitchOAuth(unittest.TestCase):

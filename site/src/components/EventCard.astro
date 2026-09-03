@@ -1,45 +1,69 @@
 ---
 interface Props {
-  event: {
-    id: number;
-    name: string;
-    action: string;
-    enabled: boolean;
-    cooldown: number;
-    params: Record<string, number | string>;
-  };
-  editable?: boolean;
+  eventNumber: number;
+  action: string;
+  displayName: string;
+  enabled: boolean;
+  cooldown: number;
+  params: Record<string, number | string>;
 }
 
-const { event, editable = false } = Astro.props;
+const { eventNumber, action, displayName, enabled, cooldown, params } = Astro.props;
 ---
 
-<div class={`event-card ${!event.enabled ? 'disabled' : ''}`}>
+<div class={`event-card ${!enabled ? 'disabled' : ''}`} data-event-number={eventNumber}>
   <div class="event-header">
-    <span class="event-number">{event.id}</span>
-    <span class="event-name">{event.name}</span>
-    <span class={`event-status ${event.enabled ? 'active' : 'inactive'}`}>
-      {event.enabled ? 'Activo' : 'Inactivo'}
-    </span>
+    <span class="event-number">{eventNumber}</span>
+    <span class="event-name">{displayName || action}</span>
+    <button class={`event-toggle ${enabled ? 'active' : 'inactive'}`} data-field="enabled">
+      {enabled ? 'Activo' : 'Inactivo'}
+    </button>
   </div>
   <div class="event-details">
     <div class="event-detail">
       <span class="detail-label">Cooldown</span>
-      <span class="detail-value">{event.cooldown}s</span>
+      <span class="detail-value">{cooldown}s</span>
     </div>
-    {Object.entries(event.params).map(([key, value]) => (
+    {Object.entries(params).map(([key, value]) => (
       <div class="event-detail">
         <span class="detail-label">{key}</span>
         <span class="detail-value">{value}</span>
       </div>
     ))}
   </div>
-  {editable && (
-    <div class="event-actions">
-      <button class="btn-edit" data-event-id={event.id}>Editar</button>
-    </div>
-  )}
 </div>
+
+<script>
+  document.querySelectorAll('.event-toggle').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const card = (btn as HTMLElement).closest('.event-card')!;
+      const eventNumber = parseInt(card.dataset.eventNumber!);
+      const current = btn.classList.contains('active');
+      const API_URL = (import.meta as any).env?.PUBLIC_API_URL || 'http://localhost:5000';
+
+      try {
+        const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
+        const { csrf_token } = await csrfRes.json();
+
+        const res = await fetch(`${API_URL}/api/events/${eventNumber}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf_token },
+          body: JSON.stringify({ enabled: !current }),
+        });
+
+        if (res.ok) {
+          btn.classList.toggle('active');
+          btn.classList.toggle('inactive');
+          btn.textContent = current ? 'Inactivo' : 'Activo';
+          card.classList.toggle('disabled');
+        }
+      } catch (e) {
+        console.error('Failed to toggle event:', e);
+      }
+    });
+  });
+</script>
 
 <style>
   .event-card {
@@ -96,21 +120,28 @@ const { event, editable = false } = Astro.props;
     flex: 1;
   }
 
-  .event-status {
+  .event-toggle {
     font-size: 0.75rem;
     font-weight: 500;
     padding: 0.25rem 0.75rem;
     border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
   }
 
-  .event-status.active {
+  .event-toggle.active {
     background: rgba(0, 200, 83, 0.15);
     color: var(--green);
   }
 
-  .event-status.inactive {
+  .event-toggle.inactive {
     background: rgba(255, 68, 68, 0.15);
     color: var(--red);
+  }
+
+  .event-toggle:hover {
+    transform: scale(1.05);
   }
 
   .event-details {
@@ -136,28 +167,5 @@ const { event, editable = false } = Astro.props;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.875rem;
     color: var(--text-primary);
-  }
-
-  .event-actions {
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
-  }
-
-  .btn-edit {
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-edit:hover {
-    background: var(--purple);
-    color: white;
-    border-color: var(--purple);
   }
 </style>

@@ -7,5 +7,8 @@ export default defineConfig({
   output: 'static',
   build: {
     format: 'directory'
+  },
+  vite: {
+    envPrefix: 'PUBLIC_',
   }
 });

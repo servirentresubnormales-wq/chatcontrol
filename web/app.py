@@ -6,9 +6,32 @@ from functools import wraps
 
 from flask import (Flask, render_template, request, redirect, url_for,
                    session, jsonify, abort)
+from flask_cors import CORS
 
 from models import init_db, Streamer, EventSettings, WebSession, OAuthState
 from twitch_oauth import TwitchOAuth, generate_state
+
+
+CSRF_TOKEN_KEY = "_csrf_token"
+
+
+def generate_csrf_token() -> str:
+    if CSRF_TOKEN_KEY not in session:
+        session[CSRF_TOKEN_KEY] = secrets.token_hex(32)
+    return session[CSRF_TOKEN_KEY]
+
+
+def validate_csrf(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            token = request.headers.get("X-CSRF-Token") or (
+                request.get_json(silent=True) or {}
+            ).get("_csrf_token")
+            if not token or token != session.get(CSRF_TOKEN_KEY):
+                return jsonify({"error": "CSRF token missing or invalid"}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 
 def create_app(config: dict = None) -> Flask:
@@ -22,6 +45,17 @@ def create_app(config: dict = None) -> Flask:
 
     if config:
         app.config.update(config)
+
+    allowed_origins = [
+        o.strip()
+        for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
+    if not allowed_origins:
+        allowed_origins = ["http://localhost:4321"]
+    CORS(app, origins=allowed_origins, supports_credentials=True)
+
+    app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
     client_id = os.environ.get("TWITCH_CLIENT_ID", "")
     client_secret = os.environ.get("TWITCH_CLIENT_SECRET", "")
@@ -136,11 +170,14 @@ def register_routes(app: Flask):
 
     @app.route("/logout", methods=["POST"])
     @login_required
+    @validate_csrf
     def logout():
         session_id = session.get("session_id")
         if session_id:
             WebSession().delete(session_id)
         session.clear()
+        if request.is_json:
+            return jsonify({"success": True})
         return redirect(url_for("login"))
 
     @app.route("/dashboard")
@@ -175,6 +212,7 @@ def register_routes(app: Flask):
 
     @app.route("/api/settings", methods=["PUT"])
     @login_required
+    @validate_csrf
     def api_update_settings():
         user = request.current_user
         data = request.get_json()
@@ -211,6 +249,7 @@ def register_routes(app: Flask):
 
     @app.route("/api/events/<int:event_number>", methods=["PUT"])
     @login_required
+    @validate_csrf
     def api_update_event(event_number):
         user = request.current_user
         data = request.get_json()
@@ -225,6 +264,7 @@ def register_routes(app: Flask):
 
     @app.route("/api/events/batch", methods=["PUT"])
     @login_required
+    @validate_csrf
     def api_update_events_batch():
         user = request.current_user
         data = request.get_json()
@@ -233,6 +273,11 @@ def register_routes(app: Flask):
 
         count = EventSettings().update_many(user["twitch_user_id"], data["events"])
         return jsonify({"success": True, "updated": count})
+
+    @app.route("/api/csrf-token", methods=["GET"])
+    @login_required
+    def api_csrf_token():
+        return jsonify({"csrf_token": generate_csrf_token()})
 
     return app
 

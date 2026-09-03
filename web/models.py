@@ -10,16 +10,16 @@ def _get_db_path() -> str:
     return os.environ.get("DB_PATH") or DEFAULT_DB_PATH
 
 DEFAULT_EVENT_CONFIG = {
-    1: {"action": "zombie", "enabled": True, "cooldown": 10, "params": {"radius": 4}},
-    2: {"action": "spiders", "enabled": True, "cooldown": 15, "params": {"amount": 4, "radius": 5}},
-    3: {"action": "slowness", "enabled": True, "cooldown": 20, "params": {"duration": 200, "amplifier": 1}},
-    4: {"action": "blindness", "enabled": True, "cooldown": 20, "params": {"duration": 160, "amplifier": 0}},
-    5: {"action": "creeper", "enabled": True, "cooldown": 30, "params": {"radius": 4}},
-    6: {"action": "storm", "enabled": True, "cooldown": 60, "params": {"duration": 600, "thunder": True}},
-    7: {"action": "random_teleport", "enabled": True, "cooldown": 60, "params": {"radius": 30, "max-attempts": 20}},
-    8: {"action": "explosion", "enabled": True, "cooldown": 30, "params": {"radius": 3.0, "fire": False, "destroy-blocks": False}},
-    9: {"action": "random_event", "enabled": True, "cooldown": 60, "params": {}},
-    10: {"action": "chickens", "enabled": True, "cooldown": 0, "params": {"amount": 1, "radius": 4}},
+    1: {"action": "zombie", "enabled": True, "cooldown": 10, "params": {"count": 3, "radius": 5}},
+    2: {"action": "spiders", "enabled": True, "cooldown": 10, "params": {"count": 2, "radius": 5}},
+    3: {"action": "slowness", "enabled": True, "cooldown": 15, "params": {"duration": 10, "amplifier": 1}},
+    4: {"action": "blindness", "enabled": True, "cooldown": 15, "params": {"duration": 8, "amplifier": 1}},
+    5: {"action": "creeper", "enabled": True, "cooldown": 30, "params": {"count": 1, "radius": 3}},
+    6: {"action": "storm", "enabled": True, "cooldown": 60, "params": {"duration": 60, "thunder": True}},
+    7: {"action": "random_teleport", "enabled": True, "cooldown": 20, "params": {"radius": 100}},
+    8: {"action": "explosion", "enabled": True, "cooldown": 30, "params": {"power": 4, "radius": 10}},
+    9: {"action": "random_event", "enabled": True, "cooldown": 45, "params": {}},
+    10: {"action": "chickens", "enabled": True, "cooldown": 0, "params": {"count": 10, "radius": 5}},
 }
 
 
@@ -102,7 +102,9 @@ class Streamer:
                     WHERE twitch_user_id = ?
                 """, (twitch_login, display_name, access_token, refresh_token, twitch_user_id))
                 conn.commit()
-                return dict(existing)
+                return conn.execute(
+                    "SELECT * FROM streamers WHERE twitch_user_id = ?", (twitch_user_id,)
+                ).fetchone()
             else:
                 conn.execute("""
                     INSERT INTO streamers (twitch_user_id, twitch_login, display_name, access_token, refresh_token)
@@ -210,6 +212,13 @@ class EventSettings:
             if not updates:
                 return False
 
+            if "enabled" in updates:
+                updates["enabled"] = 1 if updates["enabled"] is True else 0
+            if "cooldown" in updates:
+                updates["cooldown"] = max(0, int(updates["cooldown"]))
+            if "params" in updates and isinstance(updates["params"], dict):
+                updates["params"] = json.dumps(updates["params"])
+
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             values = list(updates.values()) + [twitch_user_id, event_number]
 
@@ -232,7 +241,7 @@ class EventSettings:
                     continue
                 updates = {}
                 if "enabled" in event:
-                    updates["enabled"] = 1 if event["enabled"] else 0
+                    updates["enabled"] = 1 if event["enabled"] is True else 0
                 if "cooldown" in event:
                     updates["cooldown"] = event["cooldown"]
                 if "params" in event:

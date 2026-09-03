@@ -2,13 +2,14 @@
 
 ## Overview
 
-Static frontend for ChatControl built with [Astro](https://astro.build/). Deployed to GitHub Pages.
+Static frontend for ChatControl built with [Astro](https://astro.build/). Deployed to GitHub Pages. Connects to Flask backend API for real data with fallback to mock data.
 
 ## Framework
 
 - **Astro 5.x** — Static site generator with minimal JavaScript
 - **TypeScript** — Type safety
 - **GitHub Pages** — Static hosting
+- **Flask Backend** — API at configurable URL via `PUBLIC_API_URL`
 
 ## Structure
 
@@ -17,30 +18,58 @@ site/
 ├── src/
 │   ├── pages/
 │   │   ├── index.astro       Landing page
-│   │   ├── dashboard.astro   Streamer dashboard
-│   │   └── login.astro       Twitch login
+│   │   ├── dashboard.astro   Streamer dashboard (API + mock fallback)
+│   │   └── login.astro       Twitch OAuth redirect
 │   ├── components/
 │   │   ├── Header.astro      Navigation header
 │   │   ├── Footer.astro      Site footer
-│   │   └── EventCard.astro   Event configuration card
+│   │   └── EventCard.astro   Editable event card with API toggle
 │   ├── layouts/
 │   │   └── Layout.astro      Base HTML layout
+│   ├── lib/
+│   │   ├── config.ts         API_URL from env var
+│   │   └── api.ts            API client with CSRF support
 │   └── data/
-│       └── mock.ts           Mock data for streamer, events
+│       └── mock.ts           Mock data for demo mode fallback
 ├── public/
 │   └── favicon.svg           Site favicon
+├── .env.example              PUBLIC_API_URL config
 ├── package.json
 ├── astro.config.mjs
 └── tsconfig.json
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUBLIC_API_URL` | `http://localhost:5000` | Flask backend URL |
+
+Set in `.env` or `.env.local` for development. Exposed to client via Astro's `envPrefix: 'PUBLIC_'`.
 
 ## Pages
 
 | Page | Route | Description |
 |------|-------|-------------|
 | Landing | `/` | Hero section, features, event preview |
-| Dashboard | `/dashboard/` | Streamer status, event configuration |
-| Login | `/login/` | Twitch OAuth button (mock) |
+| Dashboard | `/dashboard/` | Streamer status, event configuration (real or mock data) |
+| Login | `/login/` | Twitch OAuth redirect to Flask backend |
+
+## API Integration
+
+Dashboard fetches from Flask backend endpoints:
+
+```
+GET  /api/csrf-token  → { csrf_token }
+GET  /api/me          → { twitch_user_id, display_name, ... }
+GET  /api/events      → [{ event_number, action, enabled, ... }]
+PUT  /api/events/:id  → { enabled } (with X-CSRF-Token header)
+POST /logout          → { success } (with X-CSRF-Token header)
+```
+
+**CSRF Protection**: All mutating requests (PUT/POST) include `X-CSRF-Token` header. Token fetched once from `/api/csrf-token` and cached.
+
+**Demo Mode**: If backend is unreachable, dashboard falls back to mock data from `src/data/mock.ts`.
 
 ## Components
 
@@ -48,23 +77,7 @@ site/
 |-----------|-------------|
 | `Header` | Sticky navigation with logo and links |
 | `Footer` | Site footer with GitHub link |
-| `EventCard` | Editable event configuration card |
-
-## Mock Data
-
-All data is mock (`src/data/mock.ts`). Designed to be replaced by API calls:
-
-```typescript
-// Future API endpoints
-GET  /api/me
-GET  /api/settings
-PUT  /api/settings
-GET  /api/events
-PUT  /api/events/:id
-GET  /auth/twitch
-GET  /auth/twitch/callback
-POST /auth/logout
-```
+| `EventCard` | Toggle event enabled/disabled via API |
 
 ## Development
 
@@ -91,22 +104,16 @@ export default defineConfig({
   site: 'https://servirentresubnormales-wq.github.io',
   base: '/chatcontrol',
   output: 'static',
+  vite: {
+    envPrefix: 'PUBLIC_',
+  }
 });
 ```
 
 - `site` — GitHub Pages domain
 - `base` — Repository name path prefix
 - `output: 'static'` — Pre-rendered HTML
-
-## Routing
-
-Astro uses file-based routing:
-
-- `src/pages/index.astro` → `/`
-- `src/pages/dashboard.astro` → `/dashboard/`
-- `src/pages/login.astro` → `/login/`
-
-Trailing slashes are used for directory-style URLs.
+- `vite.envPrefix` — Expose `PUBLIC_*` env vars to client
 
 ## Design
 
@@ -115,10 +122,3 @@ Trailing slashes are used for directory-style URLs.
 - Purple (`#9146FF`) primary color
 - Inter + JetBrains Mono fonts
 - CSS custom properties for theming
-
-## Future
-
-- Connect to Flask backend for real data
-- Implement Twitch OAuth flow
-- Add event editing functionality
-- Real-time updates via WebSocket

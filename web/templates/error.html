@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatControl - Error</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0e0e10; color: #efeff1; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .error-container { text-align: center; padding: 3rem; background: #18181b; border-radius: 12px; max-width: 420px; width: 90%; }
+        .error-icon { font-size: 3rem; margin-bottom: 1rem; }
+        .error-title { font-size: 1.3rem; font-weight: 600; margin-bottom: 0.5rem; }
+        .error-msg { color: #adadb8; margin-bottom: 1.5rem; }
+        .back-btn { display: inline-block; background: #9147ff; color: #fff; text-decoration: none; padding: 0.7rem 2rem; border-radius: 6px; font-weight: 600; }
+        .back-btn:hover { background: #772ce8; }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">&#9888;</div>
+        <h1 class="error-title">Error</h1>
+        <p class="error-msg">{{ error }}</p>
+        <a href="/" class="back-btn">Volver al inicio</a>
+    </div>
+</body>
+</html>

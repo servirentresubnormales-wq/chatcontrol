@@ -1,0 +1,72 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'Controla Minecraft con tu chat de Twitch' } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <title>{title} | ChatControl</title>
+    <style is:global>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+      :root {
+        --purple: #9146FF;
+        --purple-dark: #772CE8;
+        --purple-light: #BF94FF;
+        --green: #00C853;
+        --green-dark: #00A844;
+        --red: #FF4444;
+        --bg-dark: #0E0E10;
+        --bg-card: #18181B;
+        --bg-card-hover: #1F1F23;
+        --bg-surface: #26262C;
+        --text-primary: #EFEEF1;
+        --text-secondary: #ADADB8;
+        --text-muted: #848494;
+        --border: #333338;
+        --radius: 12px;
+        --radius-sm: 8px;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: var(--bg-dark);
+        color: var(--text-primary);
+        line-height: 1.6;
+        min-height: 100vh;
+      }
+
+      a {
+        color: var(--purple-light);
+        text-decoration: none;
+      }
+
+      a:hover {
+        color: var(--purple);
+      }
+
+      code {
+        font-family: 'JetBrains Mono', monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

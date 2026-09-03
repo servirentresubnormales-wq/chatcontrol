@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatControl - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0e0e10; color: #efeff1; }
+        .header { background: #18181b; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2f2f35; }
+        .header .logo { font-size: 1.2rem; font-weight: 700; color: #9147ff; }
+        .header .user-info { display: flex; align-items: center; gap: 1rem; }
+        .header .user-info span { color: #adadb8; }
+        .logout-btn { background: none; border: 1px solid #53535f; color: #adadb8; padding: 0.4rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
+        .logout-btn:hover { border-color: #efeff1; color: #efeff1; }
+        .main { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+        .status-card { background: #18181b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .status-card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #efeff1; }
+        .status-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #2f2f35; }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #adadb8; }
+        .status-value { font-weight: 500; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-dot.green { background: #00c853; }
+        .status-dot.gray { background: #53535f; }
+        .minecraft-input { background: #2f2f35; border: 1px solid #53535f; color: #efeff1; padding: 0.5rem 0.8rem; border-radius: 4px; width: 200px; font-size: 0.9rem; }
+        .minecraft-input:focus { outline: none; border-color: #9147ff; }
+        .events-section { background: #18181b; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .events-section h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+        .event-row { display: flex; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid #2f2f35; gap: 1rem; }
+        .event-row:last-child { border-bottom: none; }
+        .event-num { width: 30px; font-weight: 700; color: #9147ff; }
+        .event-name { flex: 1; min-width: 120px; }
+        .event-toggle { position: relative; width: 44px; height: 24px; }
+        .event-toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; inset: 0; background: #53535f; border-radius: 24px; cursor: pointer; transition: 0.3s; }
+        .toggle-slider::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .event-toggle input:checked + .toggle-slider { background: #9147ff; }
+        .event-toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+        .event-cooldown { width: 70px; background: #2f2f35; border: 1px solid #53535f; color: #efeff1; padding: 0.35rem 0.5rem; border-radius: 4px; text-align: center; font-size: 0.85rem; }
+        .event-cooldown:focus { outline: none; border-color: #9147ff; }
+        .event-params { font-size: 0.8rem; color: #adadb8; width: 200px; }
+        .save-btn { background: #9147ff; color: #fff; border: none; padding: 0.7rem 2rem; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 1rem; }
+        .save-btn:hover { background: #772ce8; }
+        .save-btn:disabled { background: #53535f; cursor: not-allowed; }
+        .save-msg { margin-top: 0.5rem; font-size: 0.85rem; color: #00c853; display: none; }
+        .save-msg.error { color: #f44; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="logo">ChatControl</span>
+        <div class="user-info">
+            <span>{{ user.display_name }}</span>
+            <form method="POST" action="{{ url_for('logout') }}">
+                <button type="submit" class="logout-btn">Cerrar sesi&oacute;n</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="status-card">
+            <h2>Estado</h2>
+            <div class="status-row">
+                <span class="status-label">Twitch</span>
+                <span class="status-value"><span class="status-dot green"></span>Conectado</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Canal</span>
+                <span class="status-value">{{ user.twitch_login }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Minecraft</span>
+                <span class="status-value">
+                    <input type="text" class="minecraft-input" id="minecraftPlayer"
+                           value="{{ user.minecraft_player }}" placeholder="Nombre del jugador">
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">ChatControl</span>
+                <span class="status-value">
+                    {% if user.enabled %}
+                    <span class="status-dot green"></span>Activo
+                    {% else %}
+                    <span class="status-dot gray"></span>Inactivo
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <div class="events-section">
+            <h2>Eventos</h2>
+            {% for event in events %}
+            <div class="event-row" data-event="{{ event.event_number }}">
+                <span class="event-num">{{ event.event_number }}</span>
+                <span class="event-name">{{ event.display_name or event.action }}</span>
+                <label class="event-toggle">
+                    <input type="checkbox" class="event-enabled" data-num="{{ event.event_number }}"
+                           {% if event.enabled %}checked{% endif %}>
+                    <span class="toggle-slider"></span>
+                </label>
+                <input type="number" class="event-cooldown" data-num="{{ event.event_number }}"
+                       value="{{ event.cooldown }}" min="0" max="3600" title="Cooldown (segundos)">
+                <span class="event-params">{{ event.action }}</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <button class="save-btn" id="saveBtn" onclick="saveSettings()">Guardar configuraci&oacute;n</button>
+        <div class="save-msg" id="saveMsg"></div>
+    </div>
+
+    <script>
+        async function saveSettings() {
+            const btn = document.getElementById('saveBtn');
+            const msg = document.getElementById('saveMsg');
+            btn.disabled = true;
+            msg.style.display = 'none';
+
+            const events = [];
+            document.querySelectorAll('.event-row').forEach(row => {
+                const num = parseInt(row.dataset.event);
+                events.push({
+                    event_number: num,
+                    enabled: row.querySelector('.event-enabled').checked,
+                    cooldown: parseInt(row.querySelector('.event-cooldown').value) || 0,
+                });
+            });
+
+            const payload = {
+                minecraft_player: document.getElementById('minecraftPlayer').value,
+                events: events,
+            };
+
+            try {
+                const resp = await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    msg.textContent = 'Configuraci\u00f3n guardada correctamente.';
+                    msg.className = 'save-msg';
+                } else {
+                    msg.textContent = 'Error: ' + (data.error || 'Unknown error');
+                    msg.className = 'save-msg error';
+                }
+            } catch (e) {
+                msg.textContent = 'Error de conexi\u00f3n.';
+                msg.className = 'save-msg error';
+            }
+            msg.style.display = 'block';
+            btn.disabled = false;
+            setTimeout(() => { msg.style.display = 'none'; }, 3000);
+        }
+    </script>
+</body>
+</html>

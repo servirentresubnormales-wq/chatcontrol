@@ -1,0 +1,369 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Layout title="Inicio">
+  <Header />
+  <main>
+    <section class="hero">
+      <div class="hero-content">
+        <div class="hero-badge">Fabric 1.21.1 &middot; Python Bridge &middot; Twitch EventSub</div>
+        <h1 class="hero-title">
+          <span class="gradient-text">ChatControl</span>
+        </h1>
+        <p class="hero-subtitle">Controla Minecraft con tu chat de Twitch</p>
+        <div class="hero-actions">
+          <a href={`${base}login/`} class="btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+            </svg>
+            Iniciar sesión con Twitch
+          </a>
+          <a href="https://github.com/servirentresubnormales-wq/chatcontrol" class="btn-secondary" target="_blank" rel="noopener">
+            Ver en GitHub
+          </a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="flow-diagram">
+          <div class="flow-step">
+            <div class="flow-icon twitch">📺</div>
+            <div class="flow-label">Twitch</div>
+            <div class="flow-sublabel">EventSub</div>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-icon bridge">🐍</div>
+            <div class="flow-label">Bridge</div>
+            <div class="flow-sublabel">Python</div>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-icon core">⛏️</div>
+            <div class="flow-label">Core</div>
+            <div class="flow-sublabel">Fabric Mod</div>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="flow-icon mc">🎮</div>
+            <div class="flow-label">Minecraft</div>
+            <div class="flow-sublabel">1.21.1</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="events-preview">
+      <h2>10 Eventos Disponibles</h2>
+      <p class="section-desc">Los viewers activan eventos escribiendo números del 1 al 10 en el chat</p>
+      <div class="events-grid">
+        <div class="event-mini"><span class="num">1</span> Zombie</div>
+        <div class="event-mini"><span class="num">2</span> Arañas</div>
+        <div class="event-mini"><span class="num">3</span> Lentitud</div>
+        <div class="event-mini"><span class="num">4</span> Ceguera</div>
+        <div class="event-mini"><span class="num">5</span> Creeper</div>
+        <div class="event-mini"><span class="num">6</span> Tormenta</div>
+        <div class="event-mini"><span class="num">7</span> Teletransporte</div>
+        <div class="event-mini"><span class="num">8</span> Explosión</div>
+        <div class="event-mini"><span class="num">9</span> Evento Random</div>
+        <div class="event-mini"><span class="num">10</span> Pollos</div>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="feature">
+        <div class="feature-icon">🔒</div>
+        <h3>Autenticación Segura</h3>
+        <p>Token compartido con comparación de tiempo constante</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>Baja Latencia</h3>
+        <p>TCP directo con JSON, sin intermediarios innecesarios</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🛡️</div>
+        <h3>Seguridad</h3>
+        <p>Cooldowns, rate limiting y verificación de parámetros</p>
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Layout>
+
+<style>
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 6rem 0 4rem;
+    gap: 4rem;
+  }
+
+  .hero-badge {
+    display: inline-block;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+  }
+
+  .hero-title {
+    font-size: clamp(3rem, 8vw, 5rem);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--purple-light), var(--purple), var(--green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-subtitle {
+    font-size: 1.25rem;
+    color: var(--text-secondary);
+    margin-top: 1rem;
+    max-width: 500px;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--purple);
+    color: white;
+    padding: 0.875rem 1.75rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.2s;
+  }
+
+  .btn-primary:hover {
+    background: var(--purple-dark);
+    color: white;
+    transform: translateY(-2px);
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    padding: 0.875rem 1.75rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+  }
+
+  .hero-visual {
+    width: 100%;
+    max-width: 800px;
+  }
+
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .flow-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    min-width: 120px;
+    transition: all 0.3s;
+  }
+
+  .flow-step:hover {
+    border-color: var(--purple);
+    transform: translateY(-4px);
+  }
+
+  .flow-icon {
+    font-size: 2rem;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-surface);
+    border-radius: 50%;
+  }
+
+  .flow-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .flow-sublabel {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .flow-arrow {
+    font-size: 1.5rem;
+    color: var(--purple);
+    font-weight: 700;
+  }
+
+  .events-preview {
+    padding: 4rem 0;
+    text-align: center;
+  }
+
+  .events-preview h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  .section-desc {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+  }
+
+  .events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .event-mini {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .event-mini:hover {
+    border-color: var(--purple);
+    background: var(--bg-card-hover);
+  }
+
+  .num {
+    background: var(--purple);
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+    padding: 4rem 0 6rem;
+  }
+
+  .feature {
+    text-align: center;
+    padding: 2rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .feature-icon {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .feature h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .feature p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 768px) {
+    .hero {
+      padding: 3rem 0 2rem;
+      gap: 2rem;
+    }
+
+    .flow-diagram {
+      gap: 0.5rem;
+    }
+
+    .flow-step {
+      min-width: 80px;
+      padding: 1rem;
+    }
+
+    .flow-icon {
+      width: 45px;
+      height: 45px;
+      font-size: 1.5rem;
+    }
+
+    .flow-label {
+      font-size: 0.75rem;
+    }
+
+    .flow-sublabel {
+      font-size: 0.65rem;
+    }
+
+    .flow-arrow {
+      font-size: 1rem;
+    }
+  }
+</style>

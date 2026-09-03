@@ -1,0 +1,68 @@
+# Secrets and credentials
+config.yaml
+config_*.yaml
+.env
+.env.*
+*.env
+
+# Twitch OAuth tokens
+tokens.json
+oauth_token.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Node.js
+node_modules/
+site/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Gradle (Java Core)
+chatcontrol-mod/.gradle/
+chatcontrol-mod/.idea/
+chatcontrol-mod/*.iml
+
+# Web
+web/chatcontrol.db
+web/.pytest_cache/
+web/__pycache__/
+
+# Minecraft
+*.jar
+*.jar.bak
+server.properties
+whitelist.json
+banned-ips.json
+banned-players.json

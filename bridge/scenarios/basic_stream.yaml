@@ -1,0 +1,74 @@
+name: basic_stream_test
+description: Basic test of all event numbers + cooldowns + multi-user
+
+messages:
+  # --- All 10 events ---
+  - user: ViewerA
+    text: "1"
+
+  - user: ViewerB
+    text: "2"
+
+  - user: ViewerC
+    text: "3"
+
+  - user: ViewerD
+    text: "4"
+
+  - user: ViewerE
+    text: "5"
+
+  - user: ViewerF
+    text: "6"
+
+  - user: ViewerA
+    text: "7"
+
+  - user: ViewerB
+    text: "8"
+
+  - user: ViewerC
+    text: "9"
+
+  - user: ViewerD
+    text: "10"
+
+  # --- Cooldown test: same user, same action ---
+  - user: ViewerA
+    text: "1"
+
+  # --- Cooldown test: different user, same action ---
+  - user: ViewerB
+    text: "1"
+
+  # --- Chickens rapid fire (no cooldown) ---
+  - user: ViewerA
+    text: "10"
+
+  - user: ViewerA
+    text: "10"
+
+  - user: ViewerA
+    text: "10"
+
+  # --- Normal text (ignored) ---
+  - user: ViewerX
+    text: "hola a todos"
+
+  # --- Invalid commands ---
+  - user: ViewerY
+    text: "!invalidcmd"
+
+  - user: ViewerZ
+    text: "100"
+
+  # --- Prefix command ---
+  - user: ViewerW
+    text: "!zombie"
+
+  # --- Multi-user same action ---
+  - user: User1
+    text: "5"
+
+  - user: User2
+    text: "5"

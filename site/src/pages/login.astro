@@ -1,0 +1,156 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Layout title="Iniciar Sesión">
+  <Header />
+  <main class="login-page">
+    <div class="login-card">
+      <div class="login-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="var(--purple)">
+          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+        </svg>
+      </div>
+      <h1>Iniciar Sesión</h1>
+      <p class="login-desc">Conecta tu cuenta de Twitch para controlar tu servidor de Minecraft</p>
+
+      <a href={`${base}dashboard/`} class="btn-twitch" id="twitch-login-btn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+        </svg>
+        Iniciar sesión con Twitch
+      </a>
+
+      <div class="login-note">
+        <p>Redirigirá al backend OAuth (por implementar).</p>
+        <p>Actualmente navega al dashboard con datos mock.</p>
+      </div>
+
+      <div class="login-info">
+        <h3>¿Qué necesitas?</h3>
+        <ul>
+          <li>Cuenta de Twitch con Developer Access</li>
+          <li>Servidor Minecraft 1.21.1 con Fabric</li>
+          <li>ChatControl Core instalado</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+  <Footer />
+</Layout>
+
+<style>
+  .login-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 200px);
+    padding: 2rem 1.5rem;
+  }
+
+  .login-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 3rem;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .login-icon {
+    margin-bottom: 1.5rem;
+  }
+
+  .login-card h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  .login-desc {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+  }
+
+  .btn-twitch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--purple);
+    color: white;
+    padding: 1rem 2rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: 1rem;
+    width: 100%;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .btn-twitch:hover {
+    background: var(--purple-dark);
+    color: white;
+    transform: translateY(-2px);
+  }
+
+  .login-note {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-surface);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .login-note p + p {
+    margin-top: 0.25rem;
+  }
+
+  .login-info {
+    margin-top: 2rem;
+    text-align: left;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .login-info h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .login-info ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .login-info li {
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .login-info li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--green);
+    font-weight: 700;
+  }
+</style>
+
+<script>
+  document.getElementById('twitch-login-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    alert('OAuth real se implementará en una fase posterior.\n\nActualmente se navega al dashboard con datos mock.');
+    window.location.href = import.meta.env.BASE_URL + 'dashboard/';
+  });
+</script>

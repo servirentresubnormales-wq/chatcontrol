@@ -1,0 +1,73 @@
+---
+const base = import.meta.env.BASE_URL;
+---
+
+<header class="header">
+  <a href={base} class="logo">
+    <span class="logo-icon">⚡</span>
+    <span class="logo-text">ChatControl</span>
+  </a>
+  <nav class="nav">
+    <a href={`${base}dashboard/`} class="nav-link">Dashboard</a>
+    <a href={`${base}login/`} class="nav-btn">Iniciar Sesión</a>
+  </nav>
+</header>
+
+<style>
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background: rgba(14, 14, 16, 0.9);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.25rem;
+  }
+
+  .logo-icon {
+    font-size: 1.5rem;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .nav-link {
+    color: var(--text-secondary);
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+
+  .nav-link:hover {
+    color: var(--text-primary);
+  }
+
+  .nav-btn {
+    background: var(--purple);
+    color: white;
+    padding: 0.5rem 1.25rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.875rem;
+    transition: background 0.2s;
+  }
+
+  .nav-btn:hover {
+    background: var(--purple-dark);
+    color: white;
+  }
+</style>

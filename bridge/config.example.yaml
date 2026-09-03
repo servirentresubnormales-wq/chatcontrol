@@ -1,0 +1,58 @@
+# ChatControl Bridge Configuration
+# Copy this file to config.yaml and fill in your values.
+# NEVER commit config.yaml to git — it contains secrets.
+
+# Minecraft Core connection
+minecraft:
+  host: "127.0.0.1"          # Core server IP or hostname
+  port: 8765                  # Core server TCP port
+  auth_token: ""              # Shared secret token (must match Core config)
+
+# Bridge settings
+bridge:
+  target_player: "Streamer"   # Minecraft player name to target
+  reconnect_delay: 5          # Seconds between reconnection attempts
+  request_timeout: 5          # Socket timeout in seconds
+
+# Chat command settings
+commands:
+  prefix: "!"                 # Command prefix for named commands
+  cooldowns:
+    zombie: 10
+    spiders: 10
+    slowness: 15
+    blindness: 15
+    creeper: 30
+    storm: 60
+    randomtp: 20
+    explosion: 30
+    random: 45
+    chickens: 0
+    give_item: 20
+    summon_mob: 10
+    apply_effect: 15
+
+# Twitch integration
+# Run: python main.py --twitch-login  to obtain tokens
+twitch:
+  enabled: false
+  client_id: ""               # Twitch app client ID
+  client_secret: ""           # Twitch app client secret (NEVER commit)
+  access_token: ""            # OAuth access token (auto-generated)
+  refresh_token: ""           # OAuth refresh token (auto-generated)
+  broadcaster_id: ""          # Broadcaster user ID (auto-filled)
+  bot_user_id: ""             # Bot user ID
+  channel: ""                 # Twitch channel name to join
+
+# Event number mapping (Twitch chat -> Minecraft action)
+events:
+  "1": zombie
+  "2": spiders
+  "3": slowness
+  "4": blindness
+  "5": creeper
+  "6": storm
+  "7": random_teleport
+  "8": explosion
+  "9": random_event
+  "10": chickens

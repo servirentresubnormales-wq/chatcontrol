@@ -1,0 +1,163 @@
+---
+interface Props {
+  event: {
+    id: number;
+    name: string;
+    action: string;
+    enabled: boolean;
+    cooldown: number;
+    params: Record<string, number | string>;
+  };
+  editable?: boolean;
+}
+
+const { event, editable = false } = Astro.props;
+---
+
+<div class={`event-card ${!event.enabled ? 'disabled' : ''}`}>
+  <div class="event-header">
+    <span class="event-number">{event.id}</span>
+    <span class="event-name">{event.name}</span>
+    <span class={`event-status ${event.enabled ? 'active' : 'inactive'}`}>
+      {event.enabled ? 'Activo' : 'Inactivo'}
+    </span>
+  </div>
+  <div class="event-details">
+    <div class="event-detail">
+      <span class="detail-label">Cooldown</span>
+      <span class="detail-value">{event.cooldown}s</span>
+    </div>
+    {Object.entries(event.params).map(([key, value]) => (
+      <div class="event-detail">
+        <span class="detail-label">{key}</span>
+        <span class="detail-value">{value}</span>
+      </div>
+    ))}
+  </div>
+  {editable && (
+    <div class="event-actions">
+      <button class="btn-edit" data-event-id={event.id}>Editar</button>
+    </div>
+  )}
+</div>
+
+<style>
+  .event-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    transition: all 0.2s;
+  }
+
+  .event-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--purple);
+    transform: translateY(-2px);
+  }
+
+  .event-card.disabled {
+    opacity: 0.5;
+  }
+
+  .event-card.disabled:hover {
+    border-color: var(--border);
+    transform: none;
+  }
+
+  .event-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .event-number {
+    background: var(--purple);
+    color: white;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.875rem;
+    flex-shrink: 0;
+  }
+
+  .disabled .event-number {
+    background: var(--text-muted);
+  }
+
+  .event-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    flex: 1;
+  }
+
+  .event-status {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+  }
+
+  .event-status.active {
+    background: rgba(0, 200, 83, 0.15);
+    color: var(--green);
+  }
+
+  .event-status.inactive {
+    background: rgba(255, 68, 68, 0.15);
+    color: var(--red);
+  }
+
+  .event-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .event-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .detail-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .detail-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+
+  .event-actions {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .btn-edit {
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-edit:hover {
+    background: var(--purple);
+    color: white;
+    border-color: var(--purple);
+  }
+</style>

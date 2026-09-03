@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatControl</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0e0e10; color: #efeff1; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .login-container { text-align: center; padding: 3rem; background: #18181b; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); max-width: 420px; width: 90%; }
+        .logo { font-size: 2rem; font-weight: 700; color: #9147ff; margin-bottom: 0.5rem; }
+        .subtitle { color: #adadb8; margin-bottom: 2rem; font-size: 0.95rem; }
+        .twitch-btn { display: inline-flex; align-items: center; gap: 0.6rem; background: #9147ff; color: #fff; border: none; padding: 0.85rem 2rem; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; transition: background 0.2s; }
+        .twitch-btn:hover { background: #772ce8; }
+        .twitch-btn svg { width: 20px; height: 20px; fill: #fff; }
+        .footer { margin-top: 1.5rem; color: #53535f; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">ChatControl</div>
+        <p class="subtitle">Controla Minecraft con tu chat de Twitch.</p>
+        {% if auth_url %}
+        <a href="{{ auth_url }}" class="twitch-btn">
+            <svg viewBox="0 0 24 24"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>
+            Iniciar sesi&oacute;n con Twitch
+        </a>
+        {% else %}
+        <p style="color: #f44; margin-bottom: 1rem;">Configuraci&oacute;n de Twitch no disponible.</p>
+        {% endif %}
+        <p class="footer">Tu canal de Twitch + tu servidor de Minecraft</p>
+    </div>
+</body>
+</html>

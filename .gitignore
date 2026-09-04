@@ -64,6 +64,7 @@ web/__pycache__/
 # Minecraft
 *.jar
 *.jar.bak
+!chatcontrol-mod/gradle/wrapper/gradle-wrapper.jar
 server.properties
 whitelist.json
 banned-ips.json

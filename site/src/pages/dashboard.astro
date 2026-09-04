@@ -46,10 +46,19 @@ import { mockStreamer, mockEvents } from '../data/mock';
         </div>
         <div class="status-card">
           <div class="status-row">
+            <span class="status-label">Bridge</span>
+            <span class="status-indicator disconnected" id="bridge-status">
+              <span class="dot"></span>
+              Desconectado
+            </span>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="status-row">
             <span class="status-label">Minecraft</span>
             <span class="status-indicator disconnected" id="mc-status">
               <span class="dot"></span>
-              Sin jugador
+              Desconectado
             </span>
           </div>
           <div class="status-detail" id="mc-player">-</div>
@@ -64,6 +73,10 @@ import { mockStreamer, mockEvents } from '../data/mock';
         <div class="events-grid" id="events-grid">
         </div>
       </section>
+
+      <div class="logout-section">
+        <button id="logout-btn" class="btn-logout">Cerrar sesion</button>
+      </div>
     </div>
   </main>
   <Footer />
@@ -81,6 +94,19 @@ import { mockStreamer, mockEvents } from '../data/mock';
   const demoBanner = document.getElementById('demo-banner')!;
   const contentEl = document.getElementById('dashboard-content')!;
   const retryBtn = document.getElementById('retry-btn')!;
+  const logoutBtn = document.getElementById('logout-btn')!;
+
+  function setStatusConnected(id: string, connected: boolean, label?: string) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (connected) {
+      el.className = 'status-indicator connected';
+      el.innerHTML = `<span class="dot"></span> ${label || 'Conectado'}`;
+    } else {
+      el.className = 'status-indicator disconnected';
+      el.innerHTML = `<span class="dot"></span> ${label || 'Desconectado'}`;
+    }
+  }
 
   function showDemoMode() {
     loadingEl.style.display = 'none';
@@ -90,6 +116,8 @@ import { mockStreamer, mockEvents } from '../data/mock';
     document.getElementById('display-name')!.textContent = mockStreamer.displayName;
     document.getElementById('twitch-login')!.textContent = '@' + mockStreamer.twitchUsername;
     document.getElementById('mc-player')!.textContent = mockStreamer.minecraftUsername;
+    setStatusConnected('bridge-status', true, 'Demo');
+    setStatusConnected('mc-status', true, 'Demo');
     const grid = document.getElementById('events-grid')!;
     grid.innerHTML = mockEvents.map(e => `
       <div class="event-card ${!e.enabled ? 'disabled' : ''}">
@@ -123,11 +151,8 @@ import { mockStreamer, mockEvents } from '../data/mock';
       document.getElementById('twitch-login')!.textContent = '@' + me.twitch_login;
       document.getElementById('mc-player')!.textContent = me.minecraft_player || 'Sin jugador configurado';
 
-      const mcStatus = document.getElementById('mc-status')!;
-      if (me.minecraft_player) {
-        mcStatus.className = 'status-indicator connected';
-        mcStatus.innerHTML = '<span class="dot"></span> Conectado';
-      }
+      setStatusConnected('bridge-status', me.bridge_connected, me.bridge_connected ? 'Conectado' : 'Desconectado');
+      setStatusConnected('mc-status', me.minecraft_connected, me.minecraft_connected ? 'Conectado' : 'Desconectado');
 
       const activeEvents = events.filter(e => e.enabled);
       document.getElementById('active-count')!.textContent = activeEvents.length + ' activos';
@@ -158,6 +183,15 @@ import { mockStreamer, mockEvents } from '../data/mock';
       showDemoMode();
     }
   }
+
+  logoutBtn?.addEventListener('click', async () => {
+    try {
+      await logout();
+      window.location.href = BASE + 'login/';
+    } catch {
+      window.location.href = BASE + 'login/';
+    }
+  });
 
   retryBtn?.addEventListener('click', loadDashboard);
   loadDashboard();

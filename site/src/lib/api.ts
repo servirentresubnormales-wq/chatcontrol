@@ -1,9 +1,13 @@
+import { API_URL } from './config';
+
 export interface Streamer {
   twitch_user_id: string;
   twitch_login: string;
   display_name: string;
   minecraft_player: string;
   enabled: boolean;
+  bridge_connected: boolean;
+  minecraft_connected: boolean;
 }
 
 export interface EventConfig {

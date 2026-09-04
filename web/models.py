@@ -1,7 +1,9 @@
 import sqlite3
 import os
 import json
+import secrets
 from typing import Optional
+from datetime import datetime, timedelta
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "chatcontrol.db")
 
@@ -46,6 +48,10 @@ def init_db(db_path: str = None) -> None:
             refresh_token TEXT,
             minecraft_player TEXT DEFAULT '',
             enabled INTEGER DEFAULT 0,
+            bridge_connected INTEGER DEFAULT 0,
+            minecraft_connected INTEGER DEFAULT 0,
+            last_heartbeat TIMESTAMP,
+            bridge_token TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -117,7 +123,7 @@ class Streamer:
                         INSERT INTO event_settings (twitch_user_id, event_number, action, enabled, cooldown, params)
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (twitch_user_id, num, cfg["action"], cfg["enabled"], cfg["cooldown"],
-                          str(__import__('json').dumps(cfg["params"]))))
+                          json.dumps(cfg["params"])))
                 conn.commit()
 
                 return conn.execute(
@@ -174,6 +180,110 @@ class Streamer:
         try:
             rows = conn.execute("SELECT * FROM streamers").fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def generate_bridge_token(self, twitch_user_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        conn = get_db(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE streamers SET bridge_token = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (token, twitch_user_id))
+            conn.commit()
+            return token
+        finally:
+            conn.close()
+
+    def authenticate_bridge(self, twitch_user_id: str, bridge_token: str) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT * FROM streamers WHERE twitch_user_id = ? AND bridge_token = ?",
+                (twitch_user_id, bridge_token)
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def update_heartbeat(self, twitch_user_id: str) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET last_heartbeat = CURRENT_TIMESTAMP,
+                bridge_connected = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (twitch_user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_bridge_connected(self, twitch_user_id: str, connected: bool) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET bridge_connected = ?,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (1 if connected else 0, twitch_user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_minecraft_connected(self, twitch_user_id: str, connected: bool) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET minecraft_connected = ?,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (1 if connected else 0, twitch_user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def check_heartbeat_timeout(self, timeout_seconds: int = 60) -> int:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET bridge_connected = 0
+                WHERE bridge_connected = 1
+                AND last_heartbeat IS NOT NULL
+                AND last_heartbeat < datetime('now', ?)
+            """, (f"-{timeout_seconds} seconds",))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def revoke_bridge(self, twitch_user_id: str) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET bridge_token = NULL, bridge_connected = 0,
+                minecraft_connected = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (twitch_user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def invalidate_twitch(self, twitch_user_id: str) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute("""
+                UPDATE streamers SET access_token = NULL, refresh_token = NULL,
+                bridge_token = NULL, bridge_connected = 0, minecraft_connected = 0,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE twitch_user_id = ?
+            """, (twitch_user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()
 
@@ -245,7 +355,7 @@ class EventSettings:
                 if "cooldown" in event:
                     updates["cooldown"] = event["cooldown"]
                 if "params" in event:
-                    updates["params"] = str(__import__('json').dumps(event["params"]))
+                    updates["params"] = json.dumps(event["params"])
                 if "display_name" in event:
                     updates["display_name"] = event["display_name"]
 
@@ -295,6 +405,17 @@ class WebSession:
             cursor = conn.execute("DELETE FROM web_sessions WHERE session_id = ?", (session_id,))
             conn.commit()
             return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def delete_by_user(self, twitch_user_id: str) -> int:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute(
+                "DELETE FROM web_sessions WHERE twitch_user_id = ?", (twitch_user_id,)
+            )
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 

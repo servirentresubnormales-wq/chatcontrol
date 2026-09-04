@@ -3,6 +3,7 @@ import sys
 import json
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -67,6 +68,82 @@ class TestModels(unittest.TestCase):
         all_users = s.get_all()
         self.assertEqual(len(all_users), 2)
 
+    def test_streamer_generate_bridge_token(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        token = s.generate_bridge_token("12345")
+        self.assertTrue(len(token) > 20)
+        user = s.get("12345")
+        self.assertEqual(user["bridge_token"], token)
+
+    def test_streamer_authenticate_bridge(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        token = s.generate_bridge_token("12345")
+        self.assertTrue(s.authenticate_bridge("12345", token))
+        self.assertFalse(s.authenticate_bridge("12345", "wrong_token"))
+        self.assertFalse(s.authenticate_bridge("99999", token))
+
+    def test_streamer_heartbeat(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        s.update_heartbeat("12345")
+        user = s.get("12345")
+        self.assertEqual(user["bridge_connected"], 1)
+        self.assertIsNotNone(user["last_heartbeat"])
+
+    def test_streamer_heartbeat_timeout(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        from models import get_db
+        conn = get_db(self.db_path)
+        conn.execute("UPDATE streamers SET last_heartbeat = datetime('now', '-10 seconds'), bridge_connected = 1 WHERE twitch_user_id = '12345'")
+        conn.commit()
+        conn.close()
+        count = s.check_heartbeat_timeout(5)
+        self.assertEqual(count, 1)
+        user = s.get("12345")
+        self.assertEqual(user["bridge_connected"], 0)
+
+    def test_streamer_set_bridge_connected(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        s.set_bridge_connected("12345", True)
+        user = s.get("12345")
+        self.assertEqual(user["bridge_connected"], 1)
+        s.set_bridge_connected("12345", False)
+        user = s.get("12345")
+        self.assertEqual(user["bridge_connected"], 0)
+
+    def test_streamer_set_minecraft_connected(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        s.set_minecraft_connected("12345", True)
+        user = s.get("12345")
+        self.assertEqual(user["minecraft_connected"], 1)
+
+    def test_streamer_revoke_bridge(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        s.generate_bridge_token("12345")
+        s.set_bridge_connected("12345", True)
+        s.set_minecraft_connected("12345", True)
+        s.revoke_bridge("12345")
+        user = s.get("12345")
+        self.assertIsNone(user["bridge_token"])
+        self.assertEqual(user["bridge_connected"], 0)
+        self.assertEqual(user["minecraft_connected"], 0)
+
+    def test_streamer_invalidate_twitch(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser", "token1", "refresh1")
+        s.generate_bridge_token("12345")
+        s.invalidate_twitch("12345")
+        user = s.get("12345")
+        self.assertIsNone(user["access_token"])
+        self.assertIsNone(user["refresh_token"])
+        self.assertIsNone(user["bridge_token"])
+
     def test_event_settings_created_with_streamer(self):
         Streamer(self.db_path).get_or_create("12345", "testuser", "TestUser")
         events = EventSettings(self.db_path).get_all("12345")
@@ -123,6 +200,16 @@ class TestModels(unittest.TestCase):
         self.assertTrue(result)
         self.assertIsNone(ws.get("sess_del"))
 
+    def test_web_session_delete_by_user(self):
+        Streamer(self.db_path).get_or_create("12345", "testuser", "TestUser")
+        ws = WebSession(self.db_path)
+        ws.create("s1", "12345", "2099-01-01T00:00:00")
+        ws.create("s2", "12345", "2099-01-01T00:00:00")
+        count = ws.delete_by_user("12345")
+        self.assertEqual(count, 2)
+        self.assertIsNone(ws.get("s1"))
+        self.assertIsNone(ws.get("s2"))
+
     def test_oauth_state_create_and_use(self):
         os_state = OAuthState(self.db_path)
         os_state.create("state_abc")
@@ -157,6 +244,8 @@ class TestWebApp(unittest.TestCase):
         os.environ["SECRET_KEY"] = "test-secret-key"
         os.environ["TWITCH_CLIENT_ID"] = "test_client_id"
         os.environ["TWITCH_CLIENT_SECRET"] = "test_client_secret"
+        os.environ["TWITCH_REDIRECT_URI"] = "http://localhost:5000/auth/twitch/callback"
+        os.environ["FRONTEND_URL"] = "http://localhost:4321"
         os.environ["BASE_URL"] = "http://localhost:5000"
         self.app = create_app({"TESTING": True, "DB_PATH": self.db_path})
         self.client = self.app.test_client()
@@ -164,44 +253,36 @@ class TestWebApp(unittest.TestCase):
     def tearDown(self):
         os.close(self.db_fd)
         os.unlink(self.db_path)
-        for key in ["DB_PATH", "SECRET_KEY", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "BASE_URL"]:
+        for key in ["DB_PATH", "SECRET_KEY", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET",
+                     "TWITCH_REDIRECT_URI", "FRONTEND_URL", "BASE_URL"]:
             os.environ.pop(key, None)
-
-    def test_index_shows_login(self):
-        resp = self.client.get("/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"ChatControl", resp.data)
-
-    def test_login_page(self):
-        resp = self.client.get("/login")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"Iniciar", resp.data)
-
-    def test_dashboard_requires_login(self):
-        resp = self.client.get("/dashboard")
-        self.assertEqual(resp.status_code, 302)
-        self.assertIn("/login", resp.headers["Location"])
 
     def test_api_me_requires_login(self):
         resp = self.client.get("/api/me")
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 401)
 
     def test_api_settings_requires_login(self):
         resp = self.client.get("/api/settings")
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 401)
 
-    def test_auth_callback_missing_params(self):
-        resp = self.client.get("/auth/callback")
+    def test_auth_twitch_redirects(self):
+        resp = self.client.get("/auth/twitch")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("id.twitch.tv", resp.headers["Location"])
+
+    def test_auth_twitch_callback_missing_params(self):
+        resp = self.client.get("/auth/twitch/callback")
         self.assertEqual(resp.status_code, 400)
 
-    def test_auth_callback_invalid_state(self):
-        resp = self.client.get("/auth/callback?code=abc&state=invalid")
+    def test_auth_twitch_callback_invalid_state(self):
+        resp = self.client.get("/auth/twitch/callback?code=abc&state=invalid")
         self.assertEqual(resp.status_code, 403)
 
-    def test_auth_callback_error(self):
-        resp = self.client.get("/auth/callback?error=access_denied")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"error", resp.data.lower())
+    def test_auth_twitch_callback_error(self):
+        resp = self.client.get("/auth/twitch/callback?error=access_denied",
+                               follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("error=auth_denied", resp.headers["Location"])
 
     def test_login_with_mocked_session(self):
         Streamer(self.db_path).get_or_create("12345", "testuser", "TestUser")
@@ -209,7 +290,39 @@ class TestWebApp(unittest.TestCase):
         ws.create("valid_session", "12345", "2099-01-01T00:00:00")
         with self.client.session_transaction() as sess:
             sess["session_id"] = "valid_session"
-        resp = self.client.get("/dashboard")
+        resp = self.client.get("/api/me")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_bridge_heartbeat_requires_credentials(self):
+        resp = self.client.post("/api/bridge/heartbeat",
+            data=json.dumps({}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_bridge_heartbeat_invalid_token(self):
+        resp = self.client.post("/api/bridge/heartbeat",
+            data=json.dumps({"twitch_user_id": "12345", "bridge_token": "wrong"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_bridge_heartbeat_valid(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        token = s.generate_bridge_token("12345")
+        resp = self.client.post("/api/bridge/heartbeat",
+            data=json.dumps({"twitch_user_id": "12345", "bridge_token": token}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data["success"])
+
+    def test_heartbeat_check(self):
+        s = Streamer(self.db_path)
+        s.get_or_create("12345", "testuser", "TestUser")
+        s.update_heartbeat("12345")
+        resp = self.client.post("/api/heartbeat-check",
+            data=json.dumps({}),
+            content_type="application/json")
         self.assertEqual(resp.status_code, 200)
 
 
@@ -225,6 +338,8 @@ class TestWebAppWithUser(unittest.TestCase):
         os.environ["SECRET_KEY"] = "test-secret-key"
         os.environ["TWITCH_CLIENT_ID"] = "test_client_id"
         os.environ["TWITCH_CLIENT_SECRET"] = "test_client_secret"
+        os.environ["TWITCH_REDIRECT_URI"] = "http://localhost:5000/auth/twitch/callback"
+        os.environ["FRONTEND_URL"] = "http://localhost:4321"
         os.environ["BASE_URL"] = "http://localhost:5000"
         self.app = create_app({"TESTING": True, "DB_PATH": self.db_path})
         self.client = self.app.test_client()
@@ -232,7 +347,8 @@ class TestWebAppWithUser(unittest.TestCase):
     def tearDown(self):
         os.close(self.db_fd)
         os.unlink(self.db_path)
-        for key in ["DB_PATH", "SECRET_KEY", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "BASE_URL"]:
+        for key in ["DB_PATH", "SECRET_KEY", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET",
+                     "TWITCH_REDIRECT_URI", "FRONTEND_URL", "BASE_URL"]:
             os.environ.pop(key, None)
 
     def _login(self):
@@ -243,12 +359,6 @@ class TestWebAppWithUser(unittest.TestCase):
         resp = self.client.get("/api/csrf-token")
         return json.loads(resp.data)["csrf_token"]
 
-    def test_dashboard_with_session(self):
-        self._login()
-        resp = self.client.get("/dashboard")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn(b"TestUser", resp.data)
-
     def test_api_me(self):
         self._login()
         resp = self.client.get("/api/me")
@@ -256,6 +366,8 @@ class TestWebAppWithUser(unittest.TestCase):
         data = json.loads(resp.data)
         self.assertEqual(data["twitch_user_id"], "12345")
         self.assertEqual(data["display_name"], "TestUser")
+        self.assertIn("bridge_connected", data)
+        self.assertIn("minecraft_connected", data)
 
     def test_api_get_settings(self):
         self._login()
@@ -335,7 +447,7 @@ class TestWebAppWithUser(unittest.TestCase):
     def test_logout(self):
         self._login()
         csrf = self._get_csrf()
-        resp = self.client.post("/logout",
+        resp = self.client.post("/api/logout",
             data=json.dumps({}),
             content_type="application/json",
             headers={"X-CSRF-Token": csrf})
@@ -345,7 +457,7 @@ class TestWebAppWithUser(unittest.TestCase):
 
     def test_logout_no_csrf(self):
         self._login()
-        resp = self.client.post("/logout")
+        resp = self.client.post("/api/logout")
         self.assertEqual(resp.status_code, 403)
 
     def test_csrf_token_endpoint(self):
@@ -390,11 +502,45 @@ class TestWebAppWithUser(unittest.TestCase):
         event = EventSettings(self.db_path).get("12345", 1)
         self.assertEqual(event["enabled"], 0)
 
+    def test_bridge_register(self):
+        self._login()
+        csrf = self._get_csrf()
+        resp = self.client.post("/api/bridge/register",
+            data=json.dumps({}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertIn("bridge_token", data)
+        self.assertEqual(data["twitch_user_id"], "12345")
+
+    def test_bridge_disconnect(self):
+        self._login()
+        csrf = self._get_csrf()
+        Streamer(self.db_path).set_bridge_connected("12345", True)
+        resp = self.client.post("/api/bridge/disconnect",
+            data=json.dumps({}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(resp.status_code, 200)
+        user = Streamer(self.db_path).get("12345")
+        self.assertEqual(user["bridge_connected"], 0)
+
+    def test_session_invalidated_on_logout(self):
+        self._login()
+        csrf = self._get_csrf()
+        self.client.post("/api/logout",
+            data=json.dumps({}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": csrf})
+        resp = self.client.get("/api/me")
+        self.assertEqual(resp.status_code, 401)
+
 
 class TestTwitchOAuth(unittest.TestCase):
     def test_authorization_url(self):
         from twitch_oauth import TwitchOAuth
-        oauth = TwitchOAuth("client123", "secret456", "http://localhost:5000/auth/callback")
+        oauth = TwitchOAuth("client123", "secret456", "http://localhost:5000/auth/twitch/callback")
         url = oauth.get_authorization_url("test_state")
         self.assertIn("client_id=client123", url)
         self.assertIn("state=test_state", url)

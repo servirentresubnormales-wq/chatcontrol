@@ -19,7 +19,11 @@ const base = import.meta.env.BASE_URL;
       <h1>Iniciar Sesión</h1>
       <p class="login-desc">Conecta tu cuenta de Twitch para controlar tu servidor de Minecraft</p>
 
-      <a href={`${API_URL}/login`} class="btn-twitch" id="twitch-login-btn">
+      <div id="error-banner" class="error-banner" style="display:none;">
+        <p id="error-message"></p>
+      </div>
+
+      <a href={`${API_URL}/auth/twitch`} class="btn-twitch" id="twitch-login-btn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
         </svg>
@@ -27,7 +31,6 @@ const base = import.meta.env.BASE_URL;
       </a>
 
       <div class="login-note">
-        <p>Redirigirá al backend OAuth para autenticación.</p>
         <p id="api-status">Verificando conexión con el backend...</p>
       </div>
 
@@ -78,6 +81,16 @@ const base = import.meta.env.BASE_URL;
     margin-bottom: 2rem;
   }
 
+  .error-banner {
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 68, 68, 0.15);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    border-radius: var(--radius-sm);
+    color: var(--red);
+    font-size: 0.85rem;
+  }
+
   .btn-twitch {
     display: inline-flex;
     align-items: center;
@@ -108,10 +121,6 @@ const base = import.meta.env.BASE_URL;
     color: var(--text-muted);
   }
 
-  .login-note p + p {
-    margin-top: 0.25rem;
-  }
-
   .login-info {
     margin-top: 2rem;
     text-align: left;
@@ -140,7 +149,7 @@ const base = import.meta.env.BASE_URL;
   }
 
   .login-info li::before {
-    content: '✓';
+    content: '\2713';
     position: absolute;
     left: 0;
     color: var(--green);
@@ -151,11 +160,29 @@ const base = import.meta.env.BASE_URL;
 <script>
   const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:5000';
   const statusEl = document.getElementById('api-status');
+  const errorBanner = document.getElementById('error-banner');
+  const errorMessage = document.getElementById('error-message');
+
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get('error');
+  if (error) {
+    const errors: Record<string, string> = {
+      'auth_denied': 'Autorización denegada por el usuario.',
+      'token_exchange_failed': 'Error al intercambiar el código de autorización.',
+      'token_validation_failed': 'Error al validar el token de acceso.',
+      'user_info_failed': 'Error al obtener información del usuario.',
+    };
+    if (errorBanner && errorMessage) {
+      errorMessage.textContent = errors[error] || `Error: ${error}`;
+      errorBanner.style.display = 'block';
+    }
+    window.history.replaceState({}, '', window.location.pathname);
+  }
 
   fetch(`${API_URL}/api/me`, { credentials: 'include' })
     .then(res => {
       if (res.ok) {
-        if (statusEl) statusEl.textContent = 'Backend conectado. Redirigiendo...';
+        if (statusEl) statusEl.textContent = 'Sesión activa. Redirigiendo...';
         window.location.href = (import.meta.env.BASE_URL || '/') + 'dashboard/';
       } else if (res.status === 401 || res.status === 302) {
         if (statusEl) statusEl.textContent = 'Backend disponible. Inicia sesión con Twitch.';

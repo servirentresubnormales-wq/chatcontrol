@@ -1,6 +1,8 @@
 import os
 import secrets
+import hmac
 import json
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -11,8 +13,10 @@ from flask_cors import CORS
 from models import init_db, Streamer, EventSettings, WebSession, OAuthState
 from twitch_oauth import TwitchOAuth, generate_state
 
+logger = logging.getLogger(__name__)
 
 CSRF_TOKEN_KEY = "_csrf_token"
+HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))
 
 
 def generate_csrf_token() -> str:
@@ -28,7 +32,7 @@ def validate_csrf(f):
             token = request.headers.get("X-CSRF-Token") or (
                 request.get_json(silent=True) or {}
             ).get("_csrf_token")
-            if not token or token != session.get(CSRF_TOKEN_KEY):
+            if not token or not hmac.compare_digest(token, session.get(CSRF_TOKEN_KEY, "")):
                 return jsonify({"error": "CSRF token missing or invalid"}), 403
         return f(*args, **kwargs)
     return decorated
@@ -59,11 +63,11 @@ def create_app(config: dict = None) -> Flask:
 
     client_id = os.environ.get("TWITCH_CLIENT_ID", "")
     client_secret = os.environ.get("TWITCH_CLIENT_SECRET", "")
-    base_url = os.environ.get("BASE_URL", "http://localhost:5000")
-    redirect_uri = f"{base_url}/auth/callback"
+    redirect_uri = os.environ.get("TWITCH_REDIRECT_URI", "http://localhost:5000/auth/twitch/callback")
 
     app.twitch_oauth = TwitchOAuth(client_id, client_secret, redirect_uri)
     app.db_path = app.config.get("DB_PATH") or os.environ.get("DB_PATH") or os.path.join(os.path.dirname(__file__), "chatcontrol.db")
+    app.frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:4321")
     init_db(app.db_path)
 
     register_routes(app)
@@ -75,17 +79,23 @@ def login_required(f):
     def decorated(*args, **kwargs):
         session_id = session.get("session_id")
         if not session_id:
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Not authenticated"}), 401
             return redirect(url_for("login"))
 
         ws = WebSession()
         sess = ws.get(session_id)
         if not sess:
             session.clear()
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Session expired"}), 401
             return redirect(url_for("login"))
 
         user = Streamer().get(sess["twitch_user_id"])
         if not user:
             session.clear()
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "User not found"}), 401
             return redirect(url_for("login"))
 
         request.current_user = user
@@ -94,98 +104,6 @@ def login_required(f):
 
 
 def register_routes(app: Flask):
-
-    @app.route("/")
-    def index():
-        session_id = session.get("session_id")
-        if session_id:
-            ws = WebSession()
-            sess = ws.get(session_id)
-            if sess:
-                return redirect(url_for("dashboard"))
-        return render_template("login.html")
-
-    @app.route("/login")
-    def login():
-        state = generate_state()
-        oauth_state = OAuthState()
-        oauth_state.create(state)
-        session["oauth_state"] = state
-        auth_url = app.twitch_oauth.get_authorization_url(state)
-        return render_template("login.html", auth_url=auth_url)
-
-    @app.route("/auth/callback")
-    def auth_callback():
-        code = request.args.get("code")
-        state = request.args.get("state")
-        error = request.args.get("error")
-
-        if error:
-            return render_template("error.html", error=f"Twitch authorization failed: {error}")
-
-        if not code or not state:
-            abort(400)
-
-        stored_state = session.get("oauth_state")
-        if not stored_state or state != stored_state:
-            abort(403)
-
-        oauth_state = OAuthState()
-        if not oauth_state.use(state):
-            abort(403)
-
-        session.pop("oauth_state", None)
-
-        token_data = app.twitch_oauth.exchange_code(code)
-        if not token_data:
-            return render_template("error.html", error="Failed to exchange authorization code")
-
-        access_token = token_data.get("access_token")
-        refresh_token = token_data.get("refresh_token")
-
-        validation = app.twitch_oauth.validate_token(access_token)
-        if not validation:
-            return render_template("error.html", error="Failed to validate access token")
-
-        user_info = app.twitch_oauth.get_user_info(access_token)
-        if not user_info:
-            return render_template("error.html", error="Failed to get user information from Twitch")
-
-        streamer = Streamer()
-        user = streamer.get_or_create(
-            twitch_user_id=user_info["user_id"],
-            twitch_login=user_info["login"],
-            display_name=user_info["display_name"],
-            access_token=access_token,
-            refresh_token=refresh_token,
-        )
-
-        session_id = secrets.token_urlsafe(32)
-        expires_at = (datetime.utcnow() + timedelta(hours=24)).isoformat()
-        ws = WebSession()
-        ws.create(session_id, user["twitch_user_id"], expires_at)
-
-        session["session_id"] = session_id
-        return redirect(url_for("dashboard"))
-
-    @app.route("/logout", methods=["POST"])
-    @login_required
-    @validate_csrf
-    def logout():
-        session_id = session.get("session_id")
-        if session_id:
-            WebSession().delete(session_id)
-        session.clear()
-        if request.is_json:
-            return jsonify({"success": True})
-        return redirect(url_for("login"))
-
-    @app.route("/dashboard")
-    @login_required
-    def dashboard():
-        user = request.current_user
-        event_settings = EventSettings().get_all(user["twitch_user_id"])
-        return render_template("dashboard.html", user=user, events=event_settings)
 
     @app.route("/api/me")
     @login_required
@@ -197,6 +115,8 @@ def register_routes(app: Flask):
             "display_name": user["display_name"],
             "minecraft_player": user["minecraft_player"],
             "enabled": bool(user["enabled"]),
+            "bridge_connected": bool(user.get("bridge_connected", 0)),
+            "minecraft_connected": bool(user.get("minecraft_connected", 0)),
         })
 
     @app.route("/api/settings", methods=["GET"])
@@ -278,6 +198,131 @@ def register_routes(app: Flask):
     @login_required
     def api_csrf_token():
         return jsonify({"csrf_token": generate_csrf_token()})
+
+    @app.route("/auth/twitch")
+    def auth_twitch():
+        state = generate_state()
+        oauth_state = OAuthState()
+        oauth_state.create(state)
+        session["oauth_state"] = state
+        auth_url = app.twitch_oauth.get_authorization_url(state)
+        return redirect(auth_url)
+
+    @app.route("/auth/twitch/callback")
+    def auth_twitch_callback():
+        code = request.args.get("code")
+        state = request.args.get("state")
+        error = request.args.get("error")
+
+        if error:
+            logger.warning("Twitch OAuth error: %s", error)
+            return redirect(f"{app.frontend_url}/login/?error=auth_denied")
+
+        if not code or not state:
+            abort(400)
+
+        stored_state = session.get("oauth_state")
+        if not stored_state or not hmac.compare_digest(state, stored_state):
+            abort(403)
+
+        oauth_state = OAuthState()
+        if not oauth_state.use(state):
+            abort(403)
+
+        session.pop("oauth_state", None)
+
+        token_data = app.twitch_oauth.exchange_code(code)
+        if not token_data:
+            logger.error("Failed to exchange authorization code")
+            return redirect(f"{app.frontend_url}/login/?error=token_exchange_failed")
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+
+        validation = app.twitch_oauth.validate_token(access_token)
+        if not validation:
+            logger.error("Failed to validate access token")
+            return redirect(f"{app.frontend_url}/login/?error=token_validation_failed")
+
+        user_info = app.twitch_oauth.get_user_info(access_token)
+        if not user_info:
+            logger.error("Failed to get user info from Twitch")
+            return redirect(f"{app.frontend_url}/login/?error=user_info_failed")
+
+        streamer = Streamer()
+        existing = streamer.get(user_info["user_id"])
+        if existing:
+            WebSession().delete_by_user(user_info["user_id"])
+
+        user = streamer.get_or_create(
+            twitch_user_id=user_info["user_id"],
+            twitch_login=user_info["login"],
+            display_name=user_info["display_name"],
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+
+        session_id = secrets.token_urlsafe(32)
+        expires_at = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+        ws = WebSession()
+        ws.create(session_id, user["twitch_user_id"], expires_at)
+
+        session.regenerate()
+        session["session_id"] = session_id
+
+        return redirect(f"{app.frontend_url}/dashboard/")
+
+    @app.route("/api/logout", methods=["POST"])
+    @login_required
+    @validate_csrf
+    def api_logout():
+        session_id = session.get("session_id")
+        if session_id:
+            WebSession().delete(session_id)
+        session.clear()
+        return jsonify({"success": True})
+
+    @app.route("/api/bridge/heartbeat", methods=["POST"])
+    def api_bridge_heartbeat():
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        twitch_user_id = data.get("twitch_user_id")
+        bridge_token = data.get("bridge_token")
+
+        if not twitch_user_id or not bridge_token:
+            return jsonify({"error": "Missing twitch_user_id or bridge_token"}), 400
+
+        streamer = Streamer()
+        if not streamer.authenticate_bridge(twitch_user_id, bridge_token):
+            return jsonify({"error": "Invalid bridge credentials"}), 403
+
+        streamer.update_heartbeat(twitch_user_id)
+        return jsonify({"success": True})
+
+    @app.route("/api/bridge/register", methods=["POST"])
+    @login_required
+    @validate_csrf
+    def api_bridge_register():
+        user = request.current_user
+        streamer = Streamer()
+        token = streamer.generate_bridge_token(user["twitch_user_id"])
+        return jsonify({"bridge_token": token, "twitch_user_id": user["twitch_user_id"]})
+
+    @app.route("/api/bridge/disconnect", methods=["POST"])
+    @login_required
+    @validate_csrf
+    def api_bridge_disconnect():
+        user = request.current_user
+        Streamer().set_bridge_connected(user["twitch_user_id"], False)
+        Streamer().set_minecraft_connected(user["twitch_user_id"], False)
+        return jsonify({"success": True})
+
+    @app.route("/api/heartbeat-check", methods=["POST"])
+    def api_heartbeat_check():
+        count = Streamer().check_heartbeat_timeout(HEARTBEAT_TIMEOUT)
+        return jsonify({"timeout_disconnections": count})
 
     return app
 

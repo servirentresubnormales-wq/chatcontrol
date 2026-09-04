@@ -27,6 +27,7 @@ ENV/
 # Node.js
 node_modules/
 site/dist/
+site/.astro/
 
 # IDE
 .vscode/
@@ -53,6 +54,7 @@ htmlcov/
 chatcontrol-mod/.gradle/
 chatcontrol-mod/.idea/
 chatcontrol-mod/*.iml
+chatcontrol-mod/build/
 
 # Web
 web/chatcontrol.db

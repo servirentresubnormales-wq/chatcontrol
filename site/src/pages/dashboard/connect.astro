@@ -1,0 +1,242 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Header from '../../components/Header.astro';
+---
+
+<Layout title="Conectar Minecraft - ChatControl">
+  <Header />
+  <main class="connect-page">
+    <div class="connect-card">
+      <h1>Vincular cuenta de Minecraft</h1>
+      
+      <div id="state-loading" class="state-section">
+        <p>Cargando...</p>
+      </div>
+      
+      <div id="state-linked" class="state-section" style="display:none;">
+        <div class="linked-icon">✅</div>
+        <p>Minecraft ya está vinculado.</p>
+        <a href={`${import.meta.env.BASE_URL}dashboard/`} class="btn-secondary">Ir al Dashboard</a>
+      </div>
+      
+      <div id="state-connect" class="state-section" style="display:none;">
+        <div class="code-display" id="code-display">
+          <span class="code-digit" id="d0">-</span>
+          <span class="code-digit" id="d1">-</span>
+          <span class="code-digit" id="d2">-</span>
+          <span class="code-digit" id="d3">-</span>
+          <span class="code-digit" id="d4">-</span>
+          <span class="code-digit" id="d5">-</span>
+        </div>
+        
+        <div class="countdown" id="countdown">01:00</div>
+        
+        <button id="copy-btn" class="btn-secondary">📋 Copiar código</button>
+        
+        <div class="instructions">
+          <p>Ejecuta en el chat de tu servidor Minecraft:</p>
+          <code id="link-command">/chatcontrol link ------</code>
+        </div>
+        
+        <div class="status-panel" id="status-panel">
+          <span class="spinner"></span> Esperando confirmación...
+        </div>
+      </div>
+      
+      <div id="state-expired" class="state-section" style="display:none;">
+        <p class="expired-text">Código expirado</p>
+        <p>Generando nuevo código...</p>
+      </div>
+      
+      <div id="state-error" class="state-section" style="display:none;">
+        <div class="error-banner">
+          <p id="error-message"></p>
+        </div>
+        <button id="retry-btn" class="btn-secondary">Reintentar</button>
+      </div>
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .connect-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 200px);
+    padding: 2rem 1.5rem;
+  }
+  .connect-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 3rem;
+    max-width: 520px;
+    width: 100%;
+    text-align: center;
+  }
+  .connect-card h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.5rem; }
+  .state-section { margin: 1rem 0; }
+  .linked-icon { font-size: 3rem; margin-bottom: 1rem; }
+  .code-display { display: flex; gap: 0.75rem; justify-content: center; margin: 1.5rem 0; }
+  .code-digit {
+    width: 56px; height: 72px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-surface); border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700;
+    color: var(--text-primary); transition: border-color 0.3s;
+  }
+  .code-digit.active { border-color: var(--purple); box-shadow: 0 0 12px rgba(145, 70, 255, 0.3); }
+  .code-digit.warning { border-color: var(--red); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 8px rgba(255, 68, 68, 0.2); } 50% { box-shadow: 0 0 16px rgba(255, 68, 68, 0.5); } }
+  .countdown {
+    font-family: 'JetBrains Mono', monospace; font-size: 1rem;
+    color: var(--text-muted); margin: 1rem 0;
+  }
+  .countdown.warning { color: var(--red); }
+  .instructions { margin: 1.5rem 0; color: var(--text-secondary); font-size: 0.9rem; }
+  .instructions code {
+    display: block; margin-top: 0.5rem; padding: 0.75rem;
+    background: var(--bg-surface); border-radius: var(--radius-sm);
+    font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; color: var(--purple-light);
+  }
+  .status-panel {
+    background: var(--bg-surface); border-radius: var(--radius-sm);
+    padding: 1rem; text-align: center; font-size: 0.9rem;
+    color: var(--text-muted); margin-top: 1.5rem;
+  }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--text-muted); border-top-color: var(--purple);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: middle; margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn-secondary {
+    background: transparent; color: var(--text-muted);
+    border: 1px solid var(--border); padding: 0.5rem 1.5rem;
+    border-radius: var(--radius-sm); font-weight: 500;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .btn-secondary:hover { border-color: var(--text-muted); color: var(--text-secondary); }
+  .error-banner {
+    padding: 0.75rem 1rem; background: rgba(255, 68, 68, 0.15);
+    border: 1px solid rgba(255, 68, 68, 0.3); border-radius: var(--radius-sm);
+    color: var(--red); font-size: 0.85rem; margin-bottom: 1rem;
+  }
+  .expired-text { color: var(--red); font-weight: 600; margin-bottom: 0.5rem; }
+</style>
+
+<script>
+  const BASE = import.meta.env.BASE_URL;
+  const API = import.meta.env.PUBLIC_API_URL || '';
+  
+  let pollInterval: number | null = null;
+  let countdownInterval: number | null = null;
+  
+  async function apiFetch(path: string, opts: RequestInit = {}) {
+    const res = await fetch(`${API}${path}`, { credentials: 'include', ...opts });
+    if (res.status === 401) { window.location.href = BASE + 'login/'; throw new Error('NOT_AUTHENTICATED'); }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `Error ${res.status}`); }
+    return res.json();
+  }
+  
+  async function getCsrf(): Promise<string> {
+    const res = await fetch(`${API}/api/csrf-token`, { credentials: 'include' });
+    const data = await res.json();
+    return data.csrf_token;
+  }
+  
+  function show(id: string) {
+    document.querySelectorAll('.state-section').forEach(el => (el as HTMLElement).style.display = 'none');
+    document.getElementById(id)!.style.display = 'block';
+  }
+  
+  function setCode(code: string) {
+    for (let i = 0; i < 6; i++) {
+      const el = document.getElementById(`d${i}`)!;
+      el.textContent = code[i] || '-';
+      el.classList.toggle('active', i < code.length);
+    }
+    document.getElementById('link-command')!.textContent = `/chatcontrol link ${code}`;
+  }
+  
+  function startCountdown(expiresAt: string) {
+    if (countdownInterval) clearInterval(countdownInterval);
+    const target = new Date(expiresAt).getTime();
+    countdownInterval = window.setInterval(() => {
+      const diff = target - Date.now();
+      if (diff <= 0) {
+        clearInterval(countdownInterval!);
+        show('state-expired');
+        setTimeout(generateCode, 2000);
+        return;
+      }
+      const secs = Math.floor(diff / 1000);
+      const mins = Math.floor(secs / 60);
+      const s = secs % 60;
+      const el = document.getElementById('countdown')!;
+      el.textContent = `${String(mins).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      if (secs < 10) el.classList.add('warning');
+      else el.classList.remove('warning');
+      document.querySelectorAll('.code-digit').forEach(d => {
+        if (secs < 10) d.classList.add('warning');
+        else d.classList.remove('warning');
+      });
+    }, 1000);
+  }
+  
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = window.setInterval(async () => {
+      try {
+        const status = await apiFetch('/api/link/status');
+        if (status.linked) {
+          if (pollInterval) clearInterval(pollInterval);
+          if (countdownInterval) clearInterval(countdownInterval);
+          document.getElementById('status-panel')!.innerHTML = '✅ ¡Vinculado correctamente!';
+          setTimeout(() => { window.location.href = BASE + 'dashboard/'; }, 2000);
+        }
+      } catch (e) { /* ignore poll errors */ }
+    }, 3000);
+  }
+  
+  async function generateCode() {
+    show('state-loading');
+    try {
+      const data = await apiFetch('/api/link/start', { method: 'POST', headers: { 'X-CSRF-Token': await getCsrf(), 'Content-Type': 'application/json' } });
+      setCode(data.link_code);
+      show('state-connect');
+      startCountdown(data.expires_at);
+      startPolling();
+    } catch (e: any) {
+      if (e.message === 'NOT_AUTHENTICATED') return;
+      document.getElementById('error-message')!.textContent = e.message || 'Error al generar código';
+      show('state-error');
+    }
+  }
+  
+  document.getElementById('copy-btn')!.addEventListener('click', async () => {
+    const code = Array.from({length: 6}, (_, i) => document.getElementById(`d${i}`)!.textContent).join('');
+    try {
+      await navigator.clipboard.writeText(code);
+      const btn = document.getElementById('copy-btn')!;
+      btn.textContent = '✅ Copiado';
+      setTimeout(() => { btn.textContent = '📋 Copiar código'; }, 2000);
+    } catch (e) { /* fallback */ }
+  });
+  
+  document.getElementById('retry-btn')!.addEventListener('click', generateCode);
+  
+  (async () => {
+    try {
+      const status = await apiFetch('/api/link/status');
+      if (status.linked) { show('state-linked'); return; }
+      generateCode();
+    } catch (e: any) {
+      if (e.message === 'NOT_AUTHENTICATED') return;
+      generateCode();
+    }
+  })();
+</script>

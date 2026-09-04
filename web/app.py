@@ -9,11 +9,15 @@ from functools import wraps
 from flask import (Flask, render_template, request, redirect, url_for,
                    session, jsonify, abort)
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-from models import init_db, Streamer, EventSettings, WebSession, OAuthState
+from models import init_db, Streamer, EventSettings, WebSession, OAuthState, EmailVerification, LinkCode, StreamerLink
 from twitch_oauth import TwitchOAuth, generate_state
 
 logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
 CSRF_TOKEN_KEY = "_csrf_token"
 HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))
@@ -40,7 +44,13 @@ def validate_csrf(f):
 
 def create_app(config: dict = None) -> Flask:
     app = Flask(__name__)
-    app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+    secret_key = os.environ.get("SECRET_KEY")
+    if not secret_key:
+        if os.environ.get("FLASK_ENV") == "production":
+            raise RuntimeError("SECRET_KEY environment variable is required in production")
+        secret_key = secrets.token_hex(32)
+        logger.warning("Using random SECRET_KEY — sessions will not persist across restarts")
+    app.secret_key = secret_key
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -58,6 +68,37 @@ def create_app(config: dict = None) -> Flask:
     if not allowed_origins:
         allowed_origins = ["http://localhost:4321"]
     CORS(app, origins=allowed_origins, supports_credentials=True)
+
+    limiter.init_app(app)
+
+    _cleanup_done = {"done": False}
+
+    def cleanup_expired():
+        if _cleanup_done["done"]:
+            return
+        try:
+            WebSession().delete_expired()
+            OAuthState().cleanup(600)
+            EmailVerification().cleanup()
+            LinkCode().cleanup()
+            _cleanup_done["done"] = True
+            logger.info("Expired sessions, OAuth states, email tokens, and link codes cleaned up")
+        except Exception as e:
+            logger.error("Cleanup failed: %s", e)
+
+    @app.before_request
+    def _on_first_request():
+        cleanup_expired()
+
+    @app.after_request
+    def _add_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if not request.path.startswith("/api/"):
+            response.headers["Content-Security-Policy"] = "default-src 'self'"
+        return response
 
     app.jinja_env.globals["csrf_token"] = generate_csrf_token
 
@@ -109,6 +150,7 @@ def register_routes(app: Flask):
     @login_required
     def api_me():
         user = request.current_user
+        link = StreamerLink().get(user["twitch_user_id"])
         return jsonify({
             "twitch_user_id": user["twitch_user_id"],
             "twitch_login": user["twitch_login"],
@@ -117,6 +159,8 @@ def register_routes(app: Flask):
             "enabled": bool(user["enabled"]),
             "bridge_connected": bool(user.get("bridge_connected", 0)),
             "minecraft_connected": bool(user.get("minecraft_connected", 0)),
+            "email_verified": bool(user.get("email_verified", 0)),
+            "linked": link is not None,
         })
 
     @app.route("/api/settings", methods=["GET"])
@@ -209,6 +253,7 @@ def register_routes(app: Flask):
         return redirect(auth_url)
 
     @app.route("/auth/twitch/callback")
+    @limiter.limit("10/minute")
     def auth_twitch_callback():
         code = request.args.get("code")
         state = request.args.get("state")
@@ -260,6 +305,7 @@ def register_routes(app: Flask):
             display_name=user_info["display_name"],
             access_token=access_token,
             refresh_token=refresh_token,
+            email=user_info.get("email"),
         )
 
         session_id = secrets.token_urlsafe(32)
@@ -267,7 +313,7 @@ def register_routes(app: Flask):
         ws = WebSession()
         ws.create(session_id, user["twitch_user_id"], expires_at)
 
-        session.regenerate()
+        session.clear()
         session["session_id"] = session_id
 
         return redirect(f"{app.frontend_url}/dashboard/")
@@ -275,6 +321,7 @@ def register_routes(app: Flask):
     @app.route("/api/logout", methods=["POST"])
     @login_required
     @validate_csrf
+    @limiter.limit("20/minute")
     def api_logout():
         session_id = session.get("session_id")
         if session_id:
@@ -283,6 +330,7 @@ def register_routes(app: Flask):
         return jsonify({"success": True})
 
     @app.route("/api/bridge/heartbeat", methods=["POST"])
+    @limiter.limit("60/minute")
     def api_bridge_heartbeat():
         data = request.get_json()
         if not data:
@@ -320,9 +368,130 @@ def register_routes(app: Flask):
         return jsonify({"success": True})
 
     @app.route("/api/heartbeat-check", methods=["POST"])
+    @limiter.limit("10/minute")
     def api_heartbeat_check():
+        expected_secret = os.environ.get("HEARTBEAT_CHECK_SECRET", "")
+        if not expected_secret:
+            if os.environ.get("FLASK_ENV") == "production":
+                return jsonify({"error": "Service misconfigured"}), 503
+        else:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header != f"Bearer {expected_secret}":
+                return jsonify({"error": "Unauthorized"}), 401
         count = Streamer().check_heartbeat_timeout(HEARTBEAT_TIMEOUT)
         return jsonify({"timeout_disconnections": count})
+
+    @app.route("/health", methods=["GET"])
+    def health_check():
+        return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
+
+    @app.route("/api/email/send", methods=["POST"])
+    @login_required
+    @validate_csrf
+    @limiter.limit("3/15minutes")
+    def api_email_send():
+        user = request.current_user
+        if user.get("email_verified"):
+            return jsonify({"error": "Email already verified"}), 400
+        email = user.get("email")
+        if not email:
+            return jsonify({"error": "No email associated with Twitch account"}), 400
+        email_ttl = int(os.environ.get("EMAIL_VERIFICATION_TTL", "900"))
+        ev = EmailVerification()
+        token, expires_at = ev.create(user["twitch_user_id"], email, email_ttl)
+        frontend_url = app.frontend_url
+        verification_url = f"{frontend_url}/verify-email/?token={token}"
+        try:
+            from email_service import send_verification_email
+            send_verification_email(email, user["display_name"], verification_url)
+        except ImportError:
+            logger.warning("email_service not available — verification email not sent")
+        return jsonify({"success": True, "expires_at": expires_at})
+
+    @app.route("/api/email/status", methods=["GET"])
+    @login_required
+    def api_email_status():
+        user = request.current_user
+        status = EmailVerification().get_status(user["twitch_user_id"])
+        return jsonify(status)
+
+    @app.route("/api/email/confirm", methods=["POST"])
+    @login_required
+    @validate_csrf
+    @limiter.limit("10/minute")
+    def api_email_confirm():
+        user = request.current_user
+        data = request.get_json()
+        if not data or not data.get("token"):
+            return jsonify({"error": "Token required"}), 400
+        success = EmailVerification().consume(user["twitch_user_id"], data["token"])
+        if not success:
+            return jsonify({"error": "Invalid or expired verification token"}), 400
+        return jsonify({"success": True, "verified": True})
+
+    @app.route("/api/link/start", methods=["POST"])
+    @login_required
+    @validate_csrf
+    @limiter.limit("3/minute")
+    def api_link_start():
+        user = request.current_user
+        if not user.get("email_verified"):
+            return jsonify({"error": "Email verification required"}), 403
+        link = StreamerLink().get(user["twitch_user_id"])
+        if link:
+            return jsonify({"error": "Already linked"}), 409
+        link_ttl = int(os.environ.get("LINK_CODE_TTL", "60"))
+        lc = LinkCode()
+        code, expires_at = lc.create(user["twitch_user_id"], link_ttl)
+        return jsonify({"link_code": code, "expires_at": expires_at})
+
+    @app.route("/api/link/status", methods=["GET"])
+    @login_required
+    def api_link_status():
+        user = request.current_user
+        link = StreamerLink().get(user["twitch_user_id"])
+        if link:
+            return jsonify({
+                "linked": True,
+                "bridge_instance_id": link["bridge_instance_id"],
+                "linked_at": link["created_at"],
+            })
+        return jsonify({"linked": False})
+
+    @app.route("/api/link/complete", methods=["POST"])
+    @limiter.limit("10/minute")
+    def api_link_complete():
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        twitch_user_id = data.get("twitch_user_id")
+        bridge_token = data.get("bridge_token")
+        link_code = data.get("link_code")
+        bridge_instance_id = data.get("bridge_instance_id", "")
+        if not twitch_user_id or not bridge_token or not link_code:
+            return jsonify({"error": "Missing required fields"}), 400
+        streamer = Streamer()
+        if not streamer.authenticate_bridge(twitch_user_id, bridge_token):
+            return jsonify({"error": "Invalid bridge credentials"}), 403
+        lc = LinkCode()
+        code_id, success = lc.consume(twitch_user_id, link_code, bridge_instance_id)
+        if not success:
+            return jsonify({"error": "Invalid or expired link code"}), 400
+        return jsonify({"success": True, "streamer_link_id": code_id})
+
+    @app.route("/api/link/revoke", methods=["POST"])
+    @login_required
+    @validate_csrf
+    @limiter.limit("5/minute")
+    def api_link_revoke():
+        user = request.current_user
+        sl = StreamerLink()
+        link = sl.get(user["twitch_user_id"])
+        if not link:
+            return jsonify({"error": "No active link"}), 404
+        sl.revoke(user["twitch_user_id"])
+        Streamer().revoke_bridge(user["twitch_user_id"])
+        return jsonify({"success": True})
 
     return app
 

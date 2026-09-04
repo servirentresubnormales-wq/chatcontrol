@@ -106,5 +106,32 @@ export async function batchUpdateEvents(
 }
 
 export async function logout(): Promise<void> {
-  await apiFetch("/logout", { method: "POST" });
+  await apiFetch("/api/logout", { method: "POST" });
+}
+
+export async function sendVerification(): Promise<void> {
+  await apiFetch("/api/email/send", { method: "POST" });
+}
+
+export async function getEmailStatus(): Promise<{ verified: boolean; email: string | null }> {
+  return apiFetch("/api/email/status");
+}
+
+export async function confirmEmail(token: string): Promise<void> {
+  await apiFetch("/api/email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function startLink(): Promise<{ link_code: string; expires_at: string }> {
+  return apiFetch("/api/link/start", { method: "POST" });
+}
+
+export async function getLinkStatus(): Promise<{ linked: boolean; bridge_instance_id?: string; linked_at?: string }> {
+  return apiFetch("/api/link/status");
+}
+
+export async function revokeLink(): Promise<void> {
+  await apiFetch("/api/link/revoke", { method: "POST" });
 }

@@ -86,10 +86,37 @@ import { mockStreamer, mockEvents } from '../data/mock';
   import { getMe, getEvents, logout } from '../lib/api';
   import { mockStreamer, mockEvents } from '../data/mock';
 
-  const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = import.meta.env.PUBLIC_API_URL || '';
   const BASE = import.meta.env.BASE_URL || '/';
 
-  const loadingEl = document.getElementById('loading')!;
+  // Redirect unverified users to email verification
+  async function checkAuth() {
+    try {
+      const me = await getMe();
+      // If email not verified, redirect to verification page
+      if (!me.email_verified) {
+        window.location.href = BASE + 'verify-email/';
+        return;
+      }
+      // If not linked, redirect to linking page
+      if (!me.linked) {
+        window.location.href = BASE + 'dashboard/connect/';
+        return;
+      }
+      // User is fully authenticated, show dashboard
+      loadingEl.style.display = 'none';
+      errorEl.style.display = 'none';
+      demoBanner.style.display = 'none';
+      contentEl.style.display = 'block';
+      // ... rest of existing code
+    } catch (err: any) {
+      if (err.message === 'NOT_AUTHENTICATED') {
+        window.location.href = BASE + 'login/';
+        return;
+      }
+      showDemoMode();
+    }
+  }
   const errorEl = document.getElementById('error')!;
   const demoBanner = document.getElementById('demo-banner')!;
   const contentEl = document.getElementById('dashboard-content')!;
@@ -136,13 +163,7 @@ import { mockStreamer, mockEvents } from '../data/mock';
   }
 
   async function loadDashboard() {
-    loadingEl.style.display = 'block';
-    errorEl.style.display = 'none';
-    demoBanner.style.display = 'none';
-    contentEl.style.display = 'none';
-
-    try {
-      const me = await getMe();
+    checkAuth();
       const events = await getEvents();
       loadingEl.style.display = 'none';
       contentEl.style.display = 'block';

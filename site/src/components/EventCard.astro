@@ -39,7 +39,7 @@ const { eventNumber, action, displayName, enabled, cooldown, params } = Astro.pr
       const card = (btn as HTMLElement).closest('.event-card')!;
       const eventNumber = parseInt(card.dataset.eventNumber!);
       const current = btn.classList.contains('active');
-      const API_URL = (import.meta as any).env?.PUBLIC_API_URL || 'http://localhost:5000';
+      const API_URL = (import.meta as any).env?.PUBLIC_API_URL || '';
 
       try {
         const csrfRes = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });

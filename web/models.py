@@ -2,6 +2,8 @@ import sqlite3
 import os
 import json
 import secrets
+import hashlib
+import hmac as hmac_mod
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -82,7 +84,61 @@ def init_db(db_path: str = None) -> None:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             used INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS email_verifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            twitch_user_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (twitch_user_id) REFERENCES streamers(twitch_user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_email_verifications_token
+            ON email_verifications(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_email_verifications_user
+            ON email_verifications(twitch_user_id);
+
+        CREATE TABLE IF NOT EXISTS link_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            twitch_user_id TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            code_salt TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (twitch_user_id) REFERENCES streamers(twitch_user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_link_codes_hash
+            ON link_codes(code_hash);
+        CREATE INDEX IF NOT EXISTS idx_link_codes_user_active
+            ON link_codes(twitch_user_id, used, expires_at);
+
+        CREATE TABLE IF NOT EXISTS streamer_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            twitch_user_id TEXT NOT NULL UNIQUE,
+            bridge_instance_id TEXT NOT NULL DEFAULT '',
+            link_code_id INTEGER,
+            status TEXT DEFAULT 'LINKED' CHECK(status IN ('LINKED', 'REVOKED')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (twitch_user_id) REFERENCES streamers(twitch_user_id) ON DELETE CASCADE,
+            FOREIGN KEY (link_code_id) REFERENCES link_codes(id) ON DELETE SET NULL
+        );
     """)
+    conn.commit()
+
+    try:
+        conn.execute("ALTER TABLE streamers ADD COLUMN email TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE streamers ADD COLUMN email_verified INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -92,7 +148,7 @@ class Streamer:
         self.db_path = db_path or _get_db_path()
 
     def get_or_create(self, twitch_user_id: str, twitch_login: str, display_name: str,
-                      access_token: str = None, refresh_token: str = None) -> dict:
+                      access_token: str = None, refresh_token: str = None, email: str = None) -> dict:
         conn = get_db(self.db_path)
         try:
             existing = conn.execute(
@@ -104,18 +160,19 @@ class Streamer:
                     UPDATE streamers SET twitch_login = ?, display_name = ?,
                     access_token = COALESCE(?, access_token),
                     refresh_token = COALESCE(?, refresh_token),
+                    email = COALESCE(?, email),
                     updated_at = CURRENT_TIMESTAMP
                     WHERE twitch_user_id = ?
-                """, (twitch_login, display_name, access_token, refresh_token, twitch_user_id))
+                """, (twitch_login, display_name, access_token, refresh_token, email, twitch_user_id))
                 conn.commit()
                 return conn.execute(
                     "SELECT * FROM streamers WHERE twitch_user_id = ?", (twitch_user_id,)
                 ).fetchone()
             else:
                 conn.execute("""
-                    INSERT INTO streamers (twitch_user_id, twitch_login, display_name, access_token, refresh_token)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (twitch_user_id, twitch_login, display_name, access_token, refresh_token))
+                    INSERT INTO streamers (twitch_user_id, twitch_login, display_name, access_token, refresh_token, email)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (twitch_user_id, twitch_login, display_name, access_token, refresh_token, email))
                 conn.commit()
 
                 for num, cfg in DEFAULT_EVENT_CONFIG.items():
@@ -466,5 +523,163 @@ class OAuthState:
             )
             conn.commit()
             return cursor.rowcount
+        finally:
+            conn.close()
+
+
+class EmailVerification:
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or _get_db_path()
+
+    def create(self, twitch_user_id: str, email: str, ttl_seconds: int = 900) -> tuple:
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        expires_at = (datetime.utcnow() + timedelta(seconds=ttl_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = get_db(self.db_path)
+        try:
+            conn.execute(
+                "DELETE FROM email_verifications WHERE twitch_user_id = ? AND used = 0",
+                (twitch_user_id,)
+            )
+            conn.execute(
+                "INSERT INTO email_verifications (twitch_user_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+                (twitch_user_id, email, token_hash, expires_at)
+            )
+            conn.commit()
+            return token, expires_at
+        finally:
+            conn.close()
+
+    def consume(self, twitch_user_id: str, token: str) -> bool:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        conn = get_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT * FROM email_verifications WHERE twitch_user_id = ? AND token_hash = ? AND used = 0 AND strftime('%Y-%m-%d %H:%M:%S', expires_at) > strftime('%Y-%m-%d %H:%M:%S', CURRENT_TIMESTAMP)",
+                (twitch_user_id, token_hash)
+            ).fetchone()
+            if not row:
+                return False
+            conn.execute("UPDATE email_verifications SET used = 1 WHERE id = ?", (row["id"],))
+            conn.execute(
+                "UPDATE streamers SET email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE twitch_user_id = ?",
+                (twitch_user_id,)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def get_status(self, twitch_user_id: str) -> dict:
+        conn = get_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT email, email_verified FROM streamers WHERE twitch_user_id = ?",
+                (twitch_user_id,)
+            ).fetchone()
+            if not row:
+                return {"verified": False, "email": None}
+            return {"verified": bool(row["email_verified"]), "email": row["email"] or None}
+        finally:
+            conn.close()
+
+    def cleanup(self) -> int:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute(
+                "DELETE FROM email_verifications WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP"
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+
+class LinkCode:
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or _get_db_path()
+
+    def create(self, twitch_user_id: str, ttl_seconds: int = 60) -> tuple:
+        code = f"{secrets.randbelow(1000000):06d}"
+        salt = secrets.token_hex(16)
+        code_hash = hashlib.sha256((salt + code).encode()).hexdigest()
+        expires_at = (datetime.utcnow() + timedelta(seconds=ttl_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = get_db(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE link_codes SET used = 1 WHERE twitch_user_id = ? AND used = 0",
+                (twitch_user_id,)
+            )
+            conn.execute(
+                "INSERT INTO link_codes (twitch_user_id, code_hash, code_salt, expires_at) VALUES (?, ?, ?, ?)",
+                (twitch_user_id, code_hash, salt, expires_at)
+            )
+            conn.commit()
+            return code, expires_at
+        finally:
+            conn.close()
+
+    def consume(self, twitch_user_id: str, code: str, bridge_instance_id: str = "") -> tuple:
+        conn = get_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT * FROM link_codes WHERE twitch_user_id = ? AND used = 0 AND strftime('%Y-%m-%d %H:%M:%S', expires_at) > strftime('%Y-%m-%d %H:%M:%S', CURRENT_TIMESTAMP) ORDER BY created_at DESC LIMIT 1",
+                (twitch_user_id,)
+            ).fetchone()
+            if not row:
+                return None, False
+            computed_hash = hashlib.sha256((row["code_salt"] + code).encode()).hexdigest()
+            if not hmac_mod.compare_digest(computed_hash, row["code_hash"]):
+                return None, False
+            conn.execute("BEGIN")
+            conn.execute("UPDATE link_codes SET used = 1 WHERE id = ?", (row["id"],))
+            conn.execute(
+                "INSERT OR REPLACE INTO streamer_links (twitch_user_id, bridge_instance_id, link_code_id, status, updated_at) VALUES (?, ?, ?, 'LINKED', CURRENT_TIMESTAMP)",
+                (twitch_user_id, bridge_instance_id, row["id"])
+            )
+            conn.commit()
+            return row["id"], True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def cleanup(self) -> int:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute(
+                "DELETE FROM link_codes WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP"
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+
+class StreamerLink:
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or _get_db_path()
+
+    def get(self, twitch_user_id: str) -> Optional[dict]:
+        conn = get_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT * FROM streamer_links WHERE twitch_user_id = ? AND status = 'LINKED'",
+                (twitch_user_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def revoke(self, twitch_user_id: str) -> bool:
+        conn = get_db(self.db_path)
+        try:
+            cursor = conn.execute(
+                "UPDATE streamer_links SET status = 'REVOKED', updated_at = CURRENT_TIMESTAMP WHERE twitch_user_id = ? AND status = 'LINKED'",
+                (twitch_user_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()

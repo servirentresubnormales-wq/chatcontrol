@@ -12,7 +12,7 @@ TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 TWITCH_VALIDATE_URL = "https://id.twitch.tv/oauth2/validate"
 TWITCH_API_BASE = "https://api.twitch.tv/helix"
 
-REQUIRED_SCOPES = ["user:read:login"]
+REQUIRED_SCOPES = ["user:read:email"]
 
 
 class TwitchOAuth:
@@ -73,6 +73,7 @@ class TwitchOAuth:
                         "user_id": user["id"],
                         "login": user["login"],
                         "display_name": user["display_name"],
+                        "email": user.get("email"),
                     }
             return None
         except requests.RequestException:

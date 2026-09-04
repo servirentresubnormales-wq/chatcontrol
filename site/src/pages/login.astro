@@ -2,7 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import { API_URL } from '../lib/config';
+import { API_URL, IS_CONFIGURED } from '../lib/config';
 
 const base = import.meta.env.BASE_URL;
 ---
@@ -23,15 +23,31 @@ const base = import.meta.env.BASE_URL;
         <p id="error-message"></p>
       </div>
 
-      <a href={`${API_URL}/auth/twitch`} class="btn-twitch" id="twitch-login-btn">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
-        </svg>
-        Iniciar sesión con Twitch
-      </a>
+      {IS_CONFIGURED ? (
+        <a href={`${API_URL}/auth/twitch`} class="btn-twitch" id="twitch-login-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+          </svg>
+          Iniciar sesión con Twitch
+        </a>
+      ) : (
+        <span class="btn-twitch btn-disabled" id="twitch-login-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+          </svg>
+          Iniciar sesión con Twitch
+        </span>
+      )}
 
       <div class="login-note">
-        <p id="api-status">Verificando conexión con el backend...</p>
+        {IS_CONFIGURED ? (
+          <p id="api-status">Verificando conexión con el backend...</p>
+        ) : (
+          <div id="api-status">
+            <p class="status-unavailable">El inicio de sesión con Twitch todavía no está disponible.</p>
+            <p class="status-detail">El servidor de autenticación todavía no está configurado.</p>
+          </div>
+        )}
       </div>
 
       <div class="login-info">
@@ -112,6 +128,30 @@ const base = import.meta.env.BASE_URL;
     transform: translateY(-2px);
   }
 
+  .btn-disabled {
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .btn-disabled:hover {
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    transform: none;
+  }
+
+  .status-unavailable {
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+  }
+
+  .status-detail {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+
   .login-note {
     margin-top: 1.5rem;
     padding: 1rem;
@@ -158,7 +198,8 @@ const base = import.meta.env.BASE_URL;
 </style>
 
 <script>
-  const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = import.meta.env.PUBLIC_API_URL || '';
+  const IS_CONFIGURED = API_URL !== '' && !API_URL.includes('localhost');
   const statusEl = document.getElementById('api-status');
   const errorBanner = document.getElementById('error-banner');
   const errorMessage = document.getElementById('error-message');
@@ -179,18 +220,20 @@ const base = import.meta.env.BASE_URL;
     window.history.replaceState({}, '', window.location.pathname);
   }
 
-  fetch(`${API_URL}/api/me`, { credentials: 'include' })
-    .then(res => {
-      if (res.ok) {
-        if (statusEl) statusEl.textContent = 'Sesión activa. Redirigiendo...';
-        window.location.href = (import.meta.env.BASE_URL || '/') + 'dashboard/';
-      } else if (res.status === 401 || res.status === 302) {
-        if (statusEl) statusEl.textContent = 'Backend disponible. Inicia sesión con Twitch.';
-      } else {
-        if (statusEl) statusEl.textContent = 'Backend respondió con error.';
-      }
-    })
-    .catch(() => {
-      if (statusEl) statusEl.textContent = 'Backend no disponible. Modo demo activo.';
-    });
+  if (IS_CONFIGURED) {
+    fetch(`${API_URL}/api/me`, { credentials: 'include' })
+      .then(res => {
+        if (res.ok) {
+          if (statusEl) statusEl.textContent = 'Sesión activa. Redirigiendo...';
+          window.location.href = (import.meta.env.BASE_URL || '/') + 'dashboard/';
+        } else if (res.status === 401 || res.status === 302) {
+          if (statusEl) statusEl.textContent = 'Backend disponible. Inicia sesión con Twitch.';
+        } else {
+          if (statusEl) statusEl.textContent = 'Backend respondió con error.';
+        }
+      })
+      .catch(() => {
+        if (statusEl) statusEl.textContent = 'Backend no disponible. Modo demo activo.';
+      });
+  }
 </script>

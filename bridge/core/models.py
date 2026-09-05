@@ -109,3 +109,78 @@ class BridgeResponse:
             message_id=data.get("message_id"),
             metadata=data.get("metadata"),
         )
+
+
+@dataclass
+class LinkRequest:
+    link_code: str
+    player_name: str
+    message_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    protocol_version: int = PROTOCOL_VERSION
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "link_request",
+            "link_code": self.link_code,
+            "player_name": self.player_name,
+            "message_id": self.message_id,
+            "protocol_version": self.protocol_version,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LinkRequest:
+        return cls(
+            link_code=data.get("link_code", ""),
+            player_name=data.get("player_name", ""),
+            message_id=data.get("message_id", uuid.uuid4().hex),
+            protocol_version=data.get("protocol_version", PROTOCOL_VERSION),
+        )
+
+
+@dataclass
+class UnlinkRequest:
+    player_name: str
+    message_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    protocol_version: int = PROTOCOL_VERSION
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "unlink_request",
+            "player_name": self.player_name,
+            "message_id": self.message_id,
+            "protocol_version": self.protocol_version,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UnlinkRequest:
+        return cls(
+            player_name=data.get("player_name", ""),
+            message_id=data.get("message_id", uuid.uuid4().hex),
+            protocol_version=data.get("protocol_version", PROTOCOL_VERSION),
+        )
+
+
+@dataclass
+class LinkResponse:
+    message_id: str
+    success: bool
+    message: str = ""
+    protocol_version: int = PROTOCOL_VERSION
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "link_response",
+            "message_id": self.message_id,
+            "success": self.success,
+            "message": self.message,
+            "protocol_version": self.protocol_version,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LinkResponse:
+        return cls(
+            message_id=data.get("message_id", ""),
+            success=data.get("success", False),
+            message=data.get("message", ""),
+            protocol_version=data.get("protocol_version", PROTOCOL_VERSION),
+        )

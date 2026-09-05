@@ -20,6 +20,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "target_player": "Streamer",
         "reconnect_delay": 5,
         "request_timeout": 5,
+        "instance_id": "auto-generated",
+        "bridge_token": "",
+        "backend_url": "http://127.0.0.1:5000",
     },
     "commands": {
         "prefix": "!",
@@ -101,6 +104,22 @@ class Config:
     @property
     def request_timeout(self) -> int:
         return int(self._data["bridge"]["request_timeout"])
+
+    @property
+    def bridge_instance_id(self) -> str:
+        raw = self._data.get("bridge", {}).get("instance_id", "auto-generated")
+        if raw != "auto-generated":
+            return raw
+        import secrets
+        return secrets.token_urlsafe(16)
+
+    @property
+    def bridge_token(self) -> str:
+        return self._data.get("bridge", {}).get("bridge_token", "")
+
+    @property
+    def backend_url(self) -> str:
+        return self._data.get("bridge", {}).get("backend_url", "http://127.0.0.1:5000")
 
     @property
     def command_prefix(self) -> str:

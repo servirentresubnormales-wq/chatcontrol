@@ -257,10 +257,12 @@ class Streamer:
         conn = get_db(self.db_path)
         try:
             row = conn.execute(
-                "SELECT * FROM streamers WHERE twitch_user_id = ? AND bridge_token = ?",
-                (twitch_user_id, bridge_token)
+                "SELECT bridge_token FROM streamers WHERE twitch_user_id = ?",
+                (twitch_user_id,)
             ).fetchone()
-            return row is not None
+            if not row or not row["bridge_token"]:
+                return False
+            return hmac_mod.compare_digest(row["bridge_token"], bridge_token)
         finally:
             conn.close()
 
@@ -622,17 +624,22 @@ class LinkCode:
     def consume(self, twitch_user_id: str, code: str, bridge_instance_id: str = "") -> tuple:
         conn = get_db(self.db_path)
         try:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT * FROM link_codes WHERE twitch_user_id = ? AND used = 0 AND strftime('%Y-%m-%d %H:%M:%S', expires_at) > strftime('%Y-%m-%d %H:%M:%S', CURRENT_TIMESTAMP) ORDER BY created_at DESC LIMIT 1",
                 (twitch_user_id,)
             ).fetchone()
             if not row:
+                conn.rollback()
                 return None, False
             computed_hash = hashlib.sha256((row["code_salt"] + code).encode()).hexdigest()
             if not hmac_mod.compare_digest(computed_hash, row["code_hash"]):
+                conn.rollback()
                 return None, False
-            conn.execute("BEGIN")
-            conn.execute("UPDATE link_codes SET used = 1 WHERE id = ?", (row["id"],))
+            result = conn.execute("UPDATE link_codes SET used = 1 WHERE id = ? AND used = 0", (row["id"],))
+            if result.rowcount == 0:
+                conn.rollback()
+                return None, False
             conn.execute(
                 "INSERT OR REPLACE INTO streamer_links (twitch_user_id, bridge_instance_id, link_code_id, status, updated_at) VALUES (?, ?, ?, 'LINKED', CURRENT_TIMESTAMP)",
                 (twitch_user_id, bridge_instance_id, row["id"])

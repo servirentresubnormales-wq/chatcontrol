@@ -33,8 +33,25 @@ public class ModConfig {
     private int maxMobsPerAction = 10;
 
     private AuthenticationConfig authentication = new AuthenticationConfig();
+    private BridgeConfig bridge = new BridgeConfig();
 
     private Map<String, JsonObject> actionConfigs = new HashMap<>();
+
+    public static class BridgeConfig {
+        private String host = "127.0.0.1";
+        private int port = 8766;
+        private String backendUrl = "http://127.0.0.1:5000";
+        private String bridgeToken = "";
+
+        public String getHost() { return host; }
+        public void setHost(String host) { this.host = host; }
+        public int getPort() { return port; }
+        public void setPort(int port) { this.port = port; }
+        public String getBackendUrl() { return backendUrl; }
+        public void setBackendUrl(String backendUrl) { this.backendUrl = backendUrl; }
+        public String getBridgeToken() { return bridgeToken; }
+        public void setBridgeToken(String bridgeToken) { this.bridgeToken = bridgeToken; }
+    }
 
     public static class AuthenticationConfig {
         private boolean enabled = false;
@@ -99,6 +116,7 @@ public class ModConfig {
         this.maxItemsPerAction = loaded.maxItemsPerAction;
         this.maxMobsPerAction = loaded.maxMobsPerAction;
         this.authentication = loaded.authentication;
+        this.bridge = loaded.bridge;
         this.actionConfigs = loaded.actionConfigs;
         ChatControlMod.LOGGER.info("[ChatControl] Config reloaded.");
     }
@@ -196,6 +214,9 @@ public class ModConfig {
 
     public AuthenticationConfig getAuthentication() { return authentication; }
     public void setAuthentication(AuthenticationConfig authentication) { this.authentication = authentication; }
+
+    public BridgeConfig getBridge() { return bridge; }
+    public void setBridge(BridgeConfig bridge) { this.bridge = bridge; }
 
     public Map<String, JsonObject> getActionConfigs() { return actionConfigs; }
 }

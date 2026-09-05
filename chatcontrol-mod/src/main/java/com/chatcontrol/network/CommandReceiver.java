@@ -14,8 +14,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class CommandReceiver {
 
@@ -32,6 +34,9 @@ public class CommandReceiver {
 
     private static final int MAX_THREADS = 4;
     private static final int MAX_QUEUE_SIZE = 50;
+
+    private final CopyOnWriteArrayList<Socket> connectedClients = new CopyOnWriteArrayList<>();
+    private final ConcurrentHashMap<String, CompletableFuture<JsonObject>> pendingLinkResponses = new ConcurrentHashMap<>();
 
     public CommandReceiver(ModConfig config, ActionExecutor actionExecutor, MinecraftServer server) {
         this.config = config;
@@ -123,6 +128,8 @@ public class CommandReceiver {
             return;
         }
 
+        connectedClients.add(clientSocket);
+
         try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
              PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true)) {
 
@@ -147,6 +154,7 @@ public class CommandReceiver {
                     out.println(GSON.toJson(BridgeResponse.error(ErrorCode.INVALID_JSON, "Message too large")));
                     continue;
                 }
+                handleIncomingMessage(line);
                 String response = processCommand(line);
                 out.println(response);
             }
@@ -155,6 +163,7 @@ public class CommandReceiver {
                 ChatControlMod.LOGGER.error("[ChatControl] Client connection error", e);
             }
         } finally {
+            connectedClients.remove(clientSocket);
             authManager.removeConnection(connectionId);
             try {
                 clientSocket.close();
@@ -359,5 +368,89 @@ public class CommandReceiver {
             }
         }
         return params;
+    }
+
+    private void handleIncomingMessage(String line) {
+        try {
+            JsonObject json = GSON.fromJson(line, JsonObject.class);
+            if (json == null || !json.has("type")) return;
+
+            String type = json.get("type").getAsString();
+
+            if ("link_response".equals(type) || "unlink_response".equals(type)) {
+                String messageId = json.has("message_id") ? json.get("message_id").getAsString() : null;
+                if (messageId != null) {
+                    CompletableFuture<JsonObject> future = pendingLinkResponses.remove(messageId);
+                    if (future != null) {
+                        future.complete(json);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            ChatControlMod.LOGGER.debug("[ChatControl] Error parsing incoming message: {}", e.getMessage());
+        }
+    }
+
+    public CompletableFuture<JsonObject> broadcastLinkRequest(String linkCode, String playerName) {
+        String messageId = UUID.randomUUID().toString().replace("-", "");
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "link_request");
+        msg.addProperty("link_code", linkCode);
+        msg.addProperty("player_name", playerName);
+        msg.addProperty("message_id", messageId);
+
+        CompletableFuture<JsonObject> future = new CompletableFuture<>();
+        pendingLinkResponses.put(messageId, future);
+
+        if (!broadcastMessage(msg)) {
+            pendingLinkResponses.remove(messageId);
+            return null;
+        }
+
+        return future;
+    }
+
+    public CompletableFuture<JsonObject> broadcastUnlinkRequest(String playerName) {
+        String messageId = UUID.randomUUID().toString().replace("-", "");
+        JsonObject msg = new JsonObject();
+        msg.addProperty("type", "unlink_request");
+        msg.addProperty("player_name", playerName);
+        msg.addProperty("message_id", messageId);
+
+        CompletableFuture<JsonObject> future = new CompletableFuture<>();
+        pendingLinkResponses.put(messageId, future);
+
+        if (!broadcastMessage(msg)) {
+            pendingLinkResponses.remove(messageId);
+            return null;
+        }
+
+        return future;
+    }
+
+    private boolean broadcastMessage(JsonObject msg) {
+        if (connectedClients.isEmpty()) {
+            ChatControlMod.LOGGER.warn("[ChatControl] No Bridge clients connected");
+            return false;
+        }
+
+        String json = GSON.toJson(msg);
+        boolean sent = false;
+        for (Socket client : connectedClients) {
+            if (!client.isClosed() && client.isConnected()) {
+                try {
+                    PrintWriter out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(json);
+                    sent = true;
+                } catch (IOException e) {
+                    ChatControlMod.LOGGER.error("[ChatControl] Error sending to client: {}", e.getMessage());
+                }
+            }
+        }
+        return sent;
+    }
+
+    public int getConnectedClientCount() {
+        return connectedClients.size();
     }
 }

@@ -73,3 +73,38 @@ def deserialize_auth_response(raw: str) -> dict[str, Any]:
 
 def compare_tokens(expected: str, actual: str) -> bool:
     return hmac.compare_digest(expected.encode("utf-8"), actual.encode("utf-8"))
+
+
+def deserialize_link_request(raw: str) -> dict[str, Any]:
+    """Deserialize a link_request message from Core."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ProtocolError(f"Invalid JSON link request: {e}") from e
+    if not isinstance(data, dict):
+        raise ProtocolError(f"Expected JSON object, got {type(data).__name__}")
+    if data.get("type") != "link_request":
+        raise ProtocolError(f"Expected link_request, got type: {data.get('type')}")
+    return data
+
+def deserialize_unlink_request(raw: str) -> dict[str, Any]:
+    """Deserialize an unlink_request message from Core."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ProtocolError(f"Invalid JSON unlink request: {e}") from e
+    if not isinstance(data, dict):
+        raise ProtocolError(f"Expected JSON object, got {type(data).__name__}")
+    if data.get("type") != "unlink_request":
+        raise ProtocolError(f"Expected unlink_request, got type: {data.get('type')}")
+    return data
+
+def serialize_link_response(message_id: str, success: bool, message: str) -> str:
+    """Serialize a link_response message to Core."""
+    return json.dumps({
+        "type": "link_response",
+        "message_id": message_id,
+        "success": success,
+        "message": message,
+        "protocol_version": PROTOCOL_VERSION,
+    }, ensure_ascii=False)

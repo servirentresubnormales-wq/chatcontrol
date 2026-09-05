@@ -13,6 +13,7 @@ from typing import NoReturn
 
 from core.config import load_config
 from core.models import BridgeRequest
+from core.protocol import serialize_link_response
 from chat.command_parser import CommandParser
 from cooldowns.manager import CooldownManager
 from minecraft.client import MinecraftClient
@@ -22,6 +23,8 @@ from platforms.pipeline import ChatPipeline
 from integrations.twitch.config import TwitchConfig
 from integrations.twitch.platform import TwitchPlatform
 from integrations.twitch.auth import TwitchAuth
+from backend.client import BackendClient
+from core.state import BridgeState
 
 logger = logging.getLogger("chatcontrol")
 
@@ -92,6 +95,93 @@ def _process_chat_message(
             )
     else:
         logger.warning("[WARNING] Minecraft Core unavailable, action not sent: %s", request.action)
+
+
+def _handle_link_request(data, mc_client, backend_client, bridge_state, config):
+    """Handle link_request from Core."""
+    link_code = data.get("link_code", "")
+    player_name = data.get("player_name", "")
+    message_id = data.get("message_id", "")
+    
+    if not bridge_state.is_configured():
+        logger.warning("[LINK] Bridge not configured (missing twitch_user_id or bridge_token)")
+        response = serialize_link_response(message_id, False, "Bridge not configured")
+        try:
+            mc_client.send_raw(response + "\n")
+        except Exception as e:
+            logger.error("[LINK] Failed to send response: %s", e)
+        return
+    
+    logger.info("[LINK] Processing link request: player=%s", player_name)
+    
+    result = backend_client.complete_link(
+        twitch_user_id=bridge_state.twitch_user_id,
+        link_code=link_code,
+        bridge_instance_id=bridge_state.bridge_instance_id,
+    )
+    
+    success = result.get("success", False)
+    message = result.get("message", result.get("error", "Unknown error"))
+    
+    if success:
+        bridge_state.linked = True
+        logger.info("[LINK] Successfully linked")
+    else:
+        logger.warning("[LINK] Link failed: %s", message)
+    
+    response = serialize_link_response(message_id, success, message)
+    try:
+        mc_client.send_raw(response + "\n")
+    except Exception as e:
+        logger.error("[LINK] Failed to send response: %s", e)
+
+
+def _heartbeat_loop(backend_client, bridge_state, mc_client, running_flag):
+    """Periodic heartbeat to Backend."""
+    while running_flag.is_set():
+        try:
+            backend_client.heartbeat(
+                twitch_user_id=bridge_state.twitch_user_id,
+                bridge_instance_id=bridge_state.bridge_instance_id,
+                minecraft_connected=mc_client.connected and mc_client.authenticated,
+            )
+        except Exception as e:
+            logger.warning("[HEARTBEAT] Failed: %s", e)
+        time.sleep(30)
+
+
+def _handle_unlink_request(data, mc_client, backend_client, bridge_state):
+    """Handle unlink_request from Core."""
+    message_id = data.get("message_id", "")
+    player_name = data.get("player_name", "")
+
+    if not bridge_state.is_configured():
+        logger.warning("[UNLINK] Bridge not configured")
+        response = serialize_link_response(message_id, False, "Bridge not configured")
+        try:
+            mc_client.send_raw(response + "\n")
+        except Exception as e:
+            logger.error("[UNLINK] Failed to send response: %s", e)
+        return
+
+    logger.info("[UNLINK] Processing unlink request: player=%s", player_name)
+
+    result = backend_client.revoke_link(twitch_user_id=bridge_state.twitch_user_id)
+
+    success = result.get("success", False)
+    message = result.get("message", result.get("error", "Unknown error"))
+
+    if success:
+        bridge_state.linked = False
+        logger.info("[UNLINK] Successfully unlinked")
+    else:
+        logger.warning("[UNLINK] Unlink failed: %s", message)
+
+    response = serialize_link_response(message_id, success, message)
+    try:
+        mc_client.send_raw(response + "\n")
+    except Exception as e:
+        logger.error("[UNLINK] Failed to send response: %s", e)
 
 
 def run_mock_loop(
@@ -176,6 +266,37 @@ def run_live_loop(
     twitch_platform = None
     running = True
     action_queue: queue.Queue[BridgeRequest] = queue.Queue(maxsize=ACTION_QUEUE_MAX_SIZE)
+
+    # Initialize bridge state and backend client
+    bridge_state = BridgeState()
+    bridge_state.bridge_instance_id = config.bridge_instance_id
+    bridge_state.bridge_token = config.bridge_token
+
+    # Get twitch_user_id from Twitch config if available
+    twitch_config_data = config._data.get("twitch", {})
+    if twitch_config_data.get("broadcaster_id"):
+        bridge_state.twitch_user_id = twitch_config_data["broadcaster_id"]
+
+    backend_client = BackendClient(config.backend_url, config.bridge_token)
+
+    # Set link handlers
+    mc_client.set_link_handler(
+        lambda data: _handle_link_request(data, mc_client, backend_client, bridge_state, config)
+    )
+    mc_client.set_unlink_handler(
+        lambda data: _handle_unlink_request(data, mc_client, backend_client, bridge_state)
+    )
+
+    # Start heartbeat thread
+    running_flag = threading.Event()
+    running_flag.set()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(backend_client, bridge_state, mc_client, running_flag),
+        daemon=True,
+        name="Heartbeat",
+    )
+    heartbeat_thread.start()
 
     def handle_signal(sig, frame):
         nonlocal running
@@ -292,6 +413,7 @@ def run_live_loop(
                     logger.warning("[WARNING] Connection lost. Reconnecting...")
                     break
     finally:
+        running_flag.clear()
         if twitch_platform:
             twitch_platform.stop()
         mc_client.disconnect()

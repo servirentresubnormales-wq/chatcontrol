@@ -12,7 +12,10 @@ from core.models import BridgeRequest, BridgeResponse
 from core.protocol import (
     deserialize_auth_response,
     deserialize_response,
+    deserialize_link_request,
+    deserialize_unlink_request,
     serialize_auth_request,
+    serialize_link_response,
     serialize_request,
     validate_request,
 )
@@ -27,6 +30,10 @@ class MinecraftClient:
         self._lock = threading.Lock()
         self._connected = False
         self._authenticated = False
+        self._reader_running = False
+        self._reader_thread: threading.Thread | None = None
+        self._on_link_request = None
+        self._on_unlink_request = None
 
     @property
     def connected(self) -> bool:
@@ -79,6 +86,7 @@ class MinecraftClient:
 
                 if auth_response.get("success"):
                     self._authenticated = True
+                    self._start_reader()
                     logger.info("[INFO] Authenticated with Minecraft Core")
                     return True
                 else:
@@ -99,6 +107,7 @@ class MinecraftClient:
 
     def disconnect(self) -> None:
         with self._lock:
+            self._reader_running = False
             self._connected = False
             self._authenticated = False
             if self._sock:
@@ -108,6 +117,69 @@ class MinecraftClient:
                     pass
                 self._sock = None
             logger.info("[INFO] Disconnected from Minecraft Core")
+
+    def _start_reader(self):
+        """Start the background reader thread (called after auth succeeds)."""
+        if not self._reader_running:
+            self._reader_running = True
+            self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+            self._reader_thread.start()
+
+    def _reader_loop(self):
+        """Background thread: reads from socket and dispatches incoming messages."""
+        buffer = b""
+        while self._reader_running:
+            try:
+                data = self._sock.recv(65536)
+                if not data:
+                    break
+                buffer += data
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    raw = line.decode("utf-8").strip()
+                    if raw:
+                        self._handle_incoming(raw)
+            except OSError:
+                break
+        self._connected = False
+        self._authenticated = False
+
+    def _handle_incoming(self, raw: str):
+        """Handle an incoming message from Core (not a response to our request)."""
+        try:
+            import json
+            data = json.loads(raw)
+            msg_type = data.get("type", "")
+            
+            if msg_type == "link_request":
+                if self._on_link_request:
+                    self._on_link_request(data)
+            elif msg_type == "unlink_request":
+                if self._on_unlink_request:
+                    self._on_unlink_request(data)
+            else:
+                logger.debug("[CORE] Unknown message type: %s", msg_type)
+        except Exception as e:
+            logger.warning("[CORE] Error handling incoming message: %s", e)
+
+    def set_link_handler(self, handler):
+        """Set callback for link_request messages from Core."""
+        self._on_link_request = handler
+
+    def set_unlink_handler(self, handler):
+        """Set callback for unlink_request messages from Core."""
+        self._on_unlink_request = handler
+
+    def send_raw(self, data: str) -> None:
+        """Send raw data to Core (thread-safe). Used for unsolicited responses."""
+        with self._lock:
+            if not self._connected or not self._sock:
+                raise ConnectionError("Not connected to Minecraft Core")
+            try:
+                self._sock.sendall(data.encode("utf-8"))
+            except OSError as e:
+                self._connected = False
+                raise ConnectionError(f"Send failed: {e}") from e
 
     def send_request(self, request: BridgeRequest) -> BridgeResponse:
         errors = validate_request(request)

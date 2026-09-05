@@ -479,6 +479,24 @@ def register_routes(app: Flask):
             return jsonify({"error": "Invalid or expired link code"}), 400
         return jsonify({"success": True, "streamer_link_id": code_id})
 
+    @app.route("/api/link/revoke-bridge", methods=["POST"])
+    @limiter.limit("10/minute")
+    def api_link_revoke_bridge():
+        data = request.get_json(silent=True) or {}
+        twitch_user_id = data.get("twitch_user_id", "").strip()
+        bridge_token = data.get("bridge_token", "").strip()
+        if not twitch_user_id or not bridge_token:
+            return jsonify({"error": "Missing twitch_user_id or bridge_token"}), 400
+        if not Streamer().authenticate_bridge(twitch_user_id, bridge_token):
+            return jsonify({"error": "Unauthorized"}), 401
+        sl = StreamerLink()
+        link = sl.get(twitch_user_id)
+        if not link:
+            return jsonify({"error": "No active link"}), 404
+        sl.revoke(twitch_user_id)
+        Streamer().revoke_bridge(twitch_user_id)
+        return jsonify({"success": True})
+
     @app.route("/api/link/revoke", methods=["POST"])
     @login_required
     @validate_csrf

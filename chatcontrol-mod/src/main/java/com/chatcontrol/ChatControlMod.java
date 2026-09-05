@@ -124,6 +124,10 @@ public class ChatControlMod implements DedicatedServerModInitializer {
         return eventRegistry;
     }
 
+    public static CommandReceiver getCommandReceiver() {
+        return commandReceiver;
+    }
+
     private void registerActions() {
         actionRegistry.register(new GiveItemAction());
         actionRegistry.register(new SummonMobAction());

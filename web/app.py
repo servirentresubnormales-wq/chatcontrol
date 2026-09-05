@@ -3,6 +3,7 @@ import secrets
 import hmac
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -71,18 +72,19 @@ def create_app(config: dict = None) -> Flask:
 
     limiter.init_app(app)
 
-    _cleanup_done = {"done": False}
+    _cleanup_last_run = {"ts": 0.0}
+    CLEANUP_INTERVAL = 300  # seconds
 
     def cleanup_expired():
-        if _cleanup_done["done"]:
+        now = time.time()
+        if now - _cleanup_last_run["ts"] < CLEANUP_INTERVAL:
             return
         try:
             WebSession().delete_expired()
             OAuthState().cleanup(600)
             EmailVerification().cleanup()
             LinkCode().cleanup()
-            _cleanup_done["done"] = True
-            logger.info("Expired sessions, OAuth states, email tokens, and link codes cleaned up")
+            _cleanup_last_run["ts"] = now
         except Exception as e:
             logger.error("Cleanup failed: %s", e)
 
@@ -185,7 +187,8 @@ def register_routes(app: Flask):
 
         streamer = Streamer()
         if "minecraft_player" in data:
-            streamer.update_minecraft_player(user["twitch_user_id"], data["minecraft_player"])
+            mc_player = str(data["minecraft_player"])[:64].strip()
+            streamer.update_minecraft_player(user["twitch_user_id"], mc_player)
 
         if "enabled" in data:
             streamer.update_enabled(user["twitch_user_id"], data["enabled"])
@@ -244,6 +247,7 @@ def register_routes(app: Flask):
         return jsonify({"csrf_token": generate_csrf_token()})
 
     @app.route("/auth/twitch")
+    @limiter.limit("10/minute")
     def auth_twitch():
         state = generate_state()
         oauth_state = OAuthState()
@@ -346,7 +350,8 @@ def register_routes(app: Flask):
         if not streamer.authenticate_bridge(twitch_user_id, bridge_token):
             return jsonify({"error": "Invalid bridge credentials"}), 403
 
-        streamer.update_heartbeat(twitch_user_id)
+        minecraft_connected = bool(data.get("minecraft_connected", False))
+        streamer.update_heartbeat(twitch_user_id, minecraft_connected=minecraft_connected)
         return jsonify({"success": True})
 
     @app.route("/api/bridge/register", methods=["POST"])
@@ -372,12 +377,10 @@ def register_routes(app: Flask):
     def api_heartbeat_check():
         expected_secret = os.environ.get("HEARTBEAT_CHECK_SECRET", "")
         if not expected_secret:
-            if os.environ.get("FLASK_ENV") == "production":
-                return jsonify({"error": "Service misconfigured"}), 503
-        else:
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header != f"Bearer {expected_secret}":
-                return jsonify({"error": "Unauthorized"}), 401
+            return jsonify({"error": "Service misconfigured"}), 503
+        auth_header = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(auth_header, f"Bearer {expected_secret}"):
+            return jsonify({"error": "Unauthorized"}), 401
         count = Streamer().check_heartbeat_timeout(HEARTBEAT_TIMEOUT)
         return jsonify({"timeout_disconnections": count})
 

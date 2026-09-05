@@ -137,14 +137,24 @@ def _handle_link_request(data, mc_client, backend_client, bridge_state, config):
 
 
 def _heartbeat_loop(backend_client, bridge_state, mc_client, running_flag):
-    """Periodic heartbeat to Backend."""
+    """Periodic heartbeat to Backend. Stops if token is revoked (403)."""
+    consecutive_failures = 0
     while running_flag.is_set():
         try:
-            backend_client.heartbeat(
+            result = backend_client.heartbeat(
                 twitch_user_id=bridge_state.twitch_user_id,
                 bridge_instance_id=bridge_state.bridge_instance_id,
                 minecraft_connected=mc_client.connected and mc_client.authenticated,
             )
+            if result.get("error") == "Invalid bridge credentials":
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    logger.error("[HEARTBEAT] Token revoked (3 consecutive 403s). Shutting down.")
+                    running_flag.clear()
+                    return
+                logger.warning("[HEARTBEAT] Auth rejected (%d/3). Retrying...", consecutive_failures)
+            else:
+                consecutive_failures = 0
         except Exception as e:
             logger.warning("[HEARTBEAT] Failed: %s", e)
         time.sleep(30)
@@ -616,7 +626,6 @@ def run_twitch_login(config_path: str | None) -> None:
 
     print()
     print("[STEP 5] Tokens obtained successfully!")
-    print(f"         Access Token: {access_token[:8]}...")
     print(f"         Expires in: {expires_in}s")
     print(f"         Scopes: {', '.join(scopes)}")
     print()

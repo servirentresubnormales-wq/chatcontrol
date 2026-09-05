@@ -266,14 +266,15 @@ class Streamer:
         finally:
             conn.close()
 
-    def update_heartbeat(self, twitch_user_id: str) -> bool:
+    def update_heartbeat(self, twitch_user_id: str, minecraft_connected: bool = False) -> bool:
         conn = get_db(self.db_path)
         try:
             cursor = conn.execute("""
                 UPDATE streamers SET last_heartbeat = CURRENT_TIMESTAMP,
-                bridge_connected = 1, updated_at = CURRENT_TIMESTAMP
+                bridge_connected = 1, minecraft_connected = ?,
+                updated_at = CURRENT_TIMESTAMP
                 WHERE twitch_user_id = ?
-            """, (twitch_user_id,))
+            """, (1 if minecraft_connected else 0, twitch_user_id))
             conn.commit()
             return cursor.rowcount > 0
         finally:

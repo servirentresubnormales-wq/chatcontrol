@@ -320,10 +320,15 @@ class TestWebApp(unittest.TestCase):
         s = Streamer(self.db_path)
         s.get_or_create("12345", "testuser", "TestUser")
         s.update_heartbeat("12345")
-        resp = self.client.post("/api/heartbeat-check",
-            data=json.dumps({}),
-            content_type="application/json")
-        self.assertEqual(resp.status_code, 200)
+        os.environ["HEARTBEAT_CHECK_SECRET"] = "test_secret_123"
+        try:
+            resp = self.client.post("/api/heartbeat-check",
+                data=json.dumps({}),
+                content_type="application/json",
+                headers={"Authorization": "Bearer test_secret_123"})
+            self.assertEqual(resp.status_code, 200)
+        finally:
+            del os.environ["HEARTBEAT_CHECK_SECRET"]
 
 
 class TestWebAppWithUser(unittest.TestCase):

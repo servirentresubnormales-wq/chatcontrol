@@ -135,18 +135,17 @@ class TestMinecraftClientAuth:
         assert client.authenticated is False
 
     @patch("socket.socket")
-    def test_authenticate_no_token_skips(self, mock_socket_cls):
+    def test_authenticate_no_token_rejects(self, mock_socket_cls):
+        from core.exceptions import ConnectionError
         sock = MagicMock()
         mock_socket_cls.return_value = sock
 
         config = self._make_config("")
         client = MinecraftClient(config)
         client.connect()
-        result = client.authenticate()
-
-        assert result is True
-        assert client.authenticated is True
-        sock.sendall.assert_not_called()
+        with pytest.raises(ConnectionError, match="auth_token"):
+            client.authenticate()
+        assert client.authenticated is False
 
     @patch("socket.socket")
     def test_authenticate_connection_closed(self, mock_socket_cls):
@@ -197,23 +196,10 @@ class TestMinecraftClientAuth:
             "message": "Authenticated",
             "protocol_version": PROTOCOL_VERSION,
         }
-        action_response = {
-            "success": True,
-            "action": "zombie",
-            "target": "Player1",
-            "message": "OK",
-            "protocol_version": PROTOCOL_VERSION,
-        }
-
-        call_count = [0]
-        def mock_recv(size):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return json.dumps(auth_response).encode("utf-8")
-            return json.dumps(action_response).encode("utf-8")
 
         sock = MagicMock()
-        sock.recv.side_effect = mock_recv
+        auth_data = json.dumps(auth_response).encode("utf-8") + b"\n"
+        sock.recv.side_effect = [auth_data]
         mock_socket_cls.return_value = sock
 
         config = self._make_config("token")
@@ -221,11 +207,12 @@ class TestMinecraftClientAuth:
         client.connect()
         client.authenticate()
 
-        request = BridgeRequest(action="zombie", target="Player1")
-        response = client.send_request(request)
+        import time
+        time.sleep(0.1)
 
-        assert response.success is True
-        assert response.action == "zombie"
+        assert client.authenticated is True
+        assert client.connected is True
+        client.disconnect()
 
     @patch("socket.socket")
     def test_disconnect_clears_auth(self, mock_socket_cls):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import socket
 import threading
@@ -12,10 +12,7 @@ from core.models import BridgeRequest, BridgeResponse
 from core.protocol import (
     deserialize_auth_response,
     deserialize_response,
-    deserialize_link_request,
-    deserialize_unlink_request,
     serialize_auth_request,
-    serialize_link_response,
     serialize_request,
     validate_request,
 )
@@ -34,6 +31,8 @@ class MinecraftClient:
         self._reader_thread: threading.Thread | None = None
         self._on_link_request = None
         self._on_unlink_request = None
+        self._pending_responses: dict[str, BridgeResponse] = {}
+        self._response_events: dict[str, threading.Event] = {}
 
     @property
     def connected(self) -> bool:
@@ -68,8 +67,8 @@ class MinecraftClient:
 
             token = self._config.auth_token
             if not token:
-                self._authenticated = True
-                return True
+                self._authenticated = False
+                raise ConnectionError("No auth_token configured — authentication required")
 
             try:
                 payload = serialize_auth_request(token) + "\n"
@@ -116,17 +115,19 @@ class MinecraftClient:
                 except OSError:
                     pass
                 self._sock = None
+            for event in self._response_events.values():
+                event.set()
+            self._response_events.clear()
+            self._pending_responses.clear()
             logger.info("[INFO] Disconnected from Minecraft Core")
 
     def _start_reader(self):
-        """Start the background reader thread (called after auth succeeds)."""
         if not self._reader_running:
             self._reader_running = True
             self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
             self._reader_thread.start()
 
     def _reader_loop(self):
-        """Background thread: reads from socket and dispatches incoming messages."""
         buffer = b""
         while self._reader_running:
             try:
@@ -138,40 +139,49 @@ class MinecraftClient:
                     line, buffer = buffer.split(b"\n", 1)
                     raw = line.decode("utf-8").strip()
                     if raw:
-                        self._handle_incoming(raw)
+                        self._dispatch_incoming(raw)
             except OSError:
                 break
         self._connected = False
         self._authenticated = False
 
-    def _handle_incoming(self, raw: str):
-        """Handle an incoming message from Core (not a response to our request)."""
+    def _dispatch_incoming(self, raw: str):
         try:
-            import json
             data = json.loads(raw)
             msg_type = data.get("type", "")
-            
+            message_id = data.get("message_id", "")
+
+            if message_id and message_id in self._response_events:
+                self._pending_responses[message_id] = deserialize_response(raw)
+                self._response_events[message_id].set()
+                return
+
             if msg_type == "link_request":
                 if self._on_link_request:
-                    self._on_link_request(data)
+                    threading.Thread(
+                        target=self._on_link_request, args=(data,), daemon=True
+                    ).start()
             elif msg_type == "unlink_request":
                 if self._on_unlink_request:
-                    self._on_unlink_request(data)
+                    threading.Thread(
+                        target=self._on_unlink_request, args=(data,), daemon=True
+                    ).start()
+            elif msg_type in ("link_response", "unlink_response"):
+                if message_id and message_id in self._response_events:
+                    self._pending_responses[message_id] = deserialize_response(raw)
+                    self._response_events[message_id].set()
             else:
                 logger.debug("[CORE] Unknown message type: %s", msg_type)
         except Exception as e:
             logger.warning("[CORE] Error handling incoming message: %s", e)
 
     def set_link_handler(self, handler):
-        """Set callback for link_request messages from Core."""
         self._on_link_request = handler
 
     def set_unlink_handler(self, handler):
-        """Set callback for unlink_request messages from Core."""
         self._on_unlink_request = handler
 
     def send_raw(self, data: str) -> None:
-        """Send raw data to Core (thread-safe). Used for unsolicited responses."""
         with self._lock:
             if not self._connected or not self._sock:
                 raise ConnectionError("Not connected to Minecraft Core")
@@ -184,60 +194,66 @@ class MinecraftClient:
     def send_request(self, request: BridgeRequest) -> BridgeResponse:
         errors = validate_request(request)
         if errors:
-            from core.models import BridgeResponse as BR
-            return BR(success=False, error="INVALID_REQUEST", message="; ".join(errors))
+            return BridgeResponse(
+                success=False, error="INVALID_REQUEST", message="; ".join(errors)
+            )
 
         payload = serialize_request(request) + "\n"
+        event = threading.Event()
+        self._response_events[request.message_id] = event
 
         with self._lock:
             if not self._connected or not self._sock:
+                self._response_events.pop(request.message_id, None)
                 return BridgeResponse(
                     success=False,
                     error="NOT_CONNECTED",
                     message="Not connected to Minecraft Core",
                 )
-
             if not self._authenticated:
+                self._response_events.pop(request.message_id, None)
                 return BridgeResponse(
                     success=False,
                     error="NOT_AUTHENTICATED",
                     message="Not authenticated with Minecraft Core",
                 )
-
             try:
                 self._sock.sendall(payload.encode("utf-8"))
                 logger.info("[INFO] Sending action %s", request.action)
             except OSError as e:
+                self._response_events.pop(request.message_id, None)
                 self._connected = False
                 raise ConnectionError(f"Send failed: {e}") from e
 
-            try:
-                data = self._sock.recv(65536)
-                if not data:
-                    self._connected = False
-                    raise ConnectionError("Connection closed by server")
-                raw = data.decode("utf-8").strip()
-                response = deserialize_response(raw)
-                if response.success:
-                    logger.info(
-                        "[INFO] Action %s executed successfully",
-                        request.action,
-                    )
-                else:
-                    logger.warning(
-                        "[WARNING] Action %s failed: %s",
-                        request.action,
-                        response.error,
-                    )
-                return response
-            except ConnectionTimeoutError:
-                raise
-            except ConnectionError:
-                self._connected = False
-                raise
-            except OSError as e:
-                self._connected = False
-                raise ConnectionError(f"Receive failed: {e}") from e
+        try:
+            if not event.wait(timeout=self._config.request_timeout):
+                self._response_events.pop(request.message_id, None)
+                return BridgeResponse(
+                    success=False,
+                    error="TIMEOUT",
+                    message=f"Response timeout ({self._config.request_timeout}s)",
+                )
+
+            response = self._pending_responses.pop(request.message_id, None)
+            self._response_events.pop(request.message_id, None)
+
+            if response is None:
+                return BridgeResponse(
+                    success=False,
+                    error="NO_RESPONSE",
+                    message="No response received",
+                )
+
+            if response.success:
+                logger.info("[INFO] Action %s executed successfully", request.action)
+            else:
+                logger.warning("[WARNING] Action %s failed: %s", request.action, response.error)
+            return response
+
+        except Exception:
+            self._response_events.pop(request.message_id, None)
+            self._pending_responses.pop(request.message_id, None)
+            raise
 
     def send_and_wait(self, request: BridgeRequest) -> BridgeResponse:
         try:
@@ -245,16 +261,12 @@ class MinecraftClient:
         except ConnectionTimeoutError:
             logger.error("[ERROR] Request timed out")
             return BridgeResponse(
-                success=False,
-                error="TIMEOUT",
-                message="Request timed out",
+                success=False, error="TIMEOUT", message="Request timed out"
             )
         except ConnectionError as e:
             logger.error("[ERROR] Connection error: %s", e)
             return BridgeResponse(
-                success=False,
-                error="CONNECTION_ERROR",
-                message=str(e),
+                success=False, error="CONNECTION_ERROR", message=str(e)
             )
 
     def reconnect(self) -> None:

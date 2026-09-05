@@ -89,49 +89,28 @@ import { mockStreamer, mockEvents } from '../data/mock';
   const API_URL = import.meta.env.PUBLIC_API_URL || '';
   const BASE = import.meta.env.BASE_URL || '/';
 
-  // Redirect unverified users to email verification
-  async function checkAuth() {
-    try {
-      const me = await getMe();
-      // If email not verified, redirect to verification page
-      if (!me.email_verified) {
-        window.location.href = BASE + 'verify-email/';
-        return;
-      }
-      // If not linked, redirect to linking page
-      if (!me.linked) {
-        window.location.href = BASE + 'dashboard/connect/';
-        return;
-      }
-      // User is fully authenticated, show dashboard
-      loadingEl.style.display = 'none';
-      errorEl.style.display = 'none';
-      demoBanner.style.display = 'none';
-      contentEl.style.display = 'block';
-      // ... rest of existing code
-    } catch (err: any) {
-      if (err.message === 'NOT_AUTHENTICATED') {
-        window.location.href = BASE + 'login/';
-        return;
-      }
-      showDemoMode();
-    }
-  }
+  const loadingEl = document.getElementById('loading')!;
   const errorEl = document.getElementById('error')!;
   const demoBanner = document.getElementById('demo-banner')!;
   const contentEl = document.getElementById('dashboard-content')!;
   const retryBtn = document.getElementById('retry-btn')!;
   const logoutBtn = document.getElementById('logout-btn')!;
 
+  function escapeHtml(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   function setStatusConnected(id: string, connected: boolean, label?: string) {
     const el = document.getElementById(id);
     if (!el) return;
     if (connected) {
       el.className = 'status-indicator connected';
-      el.innerHTML = `<span class="dot"></span> ${label || 'Conectado'}`;
+      el.innerHTML = `<span class="dot"></span> ${escapeHtml(label || 'Conectado')}`;
     } else {
       el.className = 'status-indicator disconnected';
-      el.innerHTML = `<span class="dot"></span> ${label || 'Desconectado'}`;
+      el.innerHTML = `<span class="dot"></span> ${escapeHtml(label || 'Desconectado')}`;
     }
   }
 
@@ -150,12 +129,12 @@ import { mockStreamer, mockEvents } from '../data/mock';
       <div class="event-card ${!e.enabled ? 'disabled' : ''}">
         <div class="event-header">
           <span class="event-number">${e.id}</span>
-          <span class="event-name">${e.name}</span>
+          <span class="event-name">${escapeHtml(e.name)}</span>
           <span class="event-status ${e.enabled ? 'active' : 'inactive'}">${e.enabled ? 'Activo' : 'Inactivo'}</span>
         </div>
         <div class="event-details">
           <div class="event-detail"><span class="detail-label">Cooldown</span><span class="detail-value">${e.cooldown}s</span></div>
-          ${Object.entries(e.params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${k}</span><span class="detail-value">${v}</span></div>`).join('')}
+          ${Object.entries(e.params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${escapeHtml(k)}</span><span class="detail-value">${escapeHtml(String(v))}</span></div>`).join('')}
         </div>
       </div>
     `).join('');
@@ -163,8 +142,22 @@ import { mockStreamer, mockEvents } from '../data/mock';
   }
 
   async function loadDashboard() {
-    checkAuth();
-      const events = await getEvents();
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+    demoBanner.style.display = 'none';
+    contentEl.style.display = 'none';
+
+    try {
+      const me = await getMe();
+      if (!me.email_verified) {
+        window.location.href = BASE + 'verify-email/';
+        return;
+      }
+      if (!me.linked) {
+        window.location.href = BASE + 'dashboard/connect/';
+        return;
+      }
+
       loadingEl.style.display = 'none';
       contentEl.style.display = 'block';
 
@@ -175,27 +168,31 @@ import { mockStreamer, mockEvents } from '../data/mock';
       setStatusConnected('bridge-status', me.bridge_connected, me.bridge_connected ? 'Conectado' : 'Desconectado');
       setStatusConnected('mc-status', me.minecraft_connected, me.minecraft_connected ? 'Conectado' : 'Desconectado');
 
-      const activeEvents = events.filter(e => e.enabled);
-      document.getElementById('active-count')!.textContent = activeEvents.length + ' activos';
+      try {
+        const events = await getEvents();
+        const activeEvents = events.filter((e: any) => e.enabled);
+        document.getElementById('active-count')!.textContent = activeEvents.length + ' activos';
 
-      const grid = document.getElementById('events-grid')!;
-      grid.innerHTML = events.map(e => {
-        const params = typeof e.params === 'string' ? JSON.parse(e.params) : e.params;
-        return `
-          <div class="event-card ${!e.enabled ? 'disabled' : ''}">
-            <div class="event-header">
-              <span class="event-number">${e.event_number}</span>
-              <span class="event-name">${e.display_name || e.action}</span>
-              <span class="event-status ${e.enabled ? 'active' : 'inactive'}">${e.enabled ? 'Activo' : 'Inactivo'}</span>
+        const grid = document.getElementById('events-grid')!;
+        grid.innerHTML = events.map((e: any) => {
+          const params = typeof e.params === 'string' ? JSON.parse(e.params) : (e.params || {});
+          return `
+            <div class="event-card ${!e.enabled ? 'disabled' : ''}">
+              <div class="event-header">
+                <span class="event-number">${e.event_number}</span>
+                <span class="event-name">${escapeHtml(e.display_name || e.action)}</span>
+                <span class="event-status ${e.enabled ? 'active' : 'inactive'}">${e.enabled ? 'Activo' : 'Inactivo'}</span>
+              </div>
+              <div class="event-details">
+                <div class="event-detail"><span class="detail-label">Cooldown</span><span class="detail-value">${e.cooldown}s</span></div>
+                ${Object.entries(params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${escapeHtml(k)}</span><span class="detail-value">${escapeHtml(String(v))}</span></div>`).join('')}
+              </div>
             </div>
-            <div class="event-details">
-              <div class="event-detail"><span class="detail-label">Cooldown</span><span class="detail-value">${e.cooldown}s</span></div>
-              ${Object.entries(params).map(([k,v]) => `<div class="event-detail"><span class="detail-label">${k}</span><span class="detail-value">${v}</span></div>`).join('')}
-            </div>
-          </div>
-        `;
-      }).join('');
-
+          `;
+        }).join('');
+      } catch {
+        document.getElementById('active-count')!.textContent = '0 activos';
+      }
     } catch (err: any) {
       if (err.message === 'NOT_AUTHENTICATED') {
         window.location.href = BASE + 'login/';

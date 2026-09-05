@@ -8,6 +8,8 @@ export interface Streamer {
   enabled: boolean;
   bridge_connected: boolean;
   minecraft_connected: boolean;
+  email_verified: boolean;
+  linked: boolean;
 }
 
 export interface EventConfig {

@@ -136,7 +136,7 @@ def _handle_link_request(data, mc_client, backend_client, bridge_state, config):
         logger.error("[LINK] Failed to send response: %s", e)
 
 
-def _heartbeat_loop(backend_client, bridge_state, mc_client, running_flag):
+def _heartbeat_loop(backend_client, bridge_state, mc_client, running_flag, cooldowns=None):
     """Periodic heartbeat to Backend. Stops if token is revoked (403)."""
     consecutive_failures = 0
     while running_flag.is_set():
@@ -157,6 +157,11 @@ def _heartbeat_loop(backend_client, bridge_state, mc_client, running_flag):
                 consecutive_failures = 0
         except Exception as e:
             logger.warning("[HEARTBEAT] Failed: %s", e)
+        if cooldowns:
+            try:
+                cooldowns.cleanup_expired()
+            except Exception:
+                pass
         time.sleep(30)
 
 
@@ -302,7 +307,7 @@ def run_live_loop(
     running_flag.set()
     heartbeat_thread = threading.Thread(
         target=_heartbeat_loop,
-        args=(backend_client, bridge_state, mc_client, running_flag),
+        args=(backend_client, bridge_state, mc_client, running_flag, cooldowns),
         daemon=True,
         name="Heartbeat",
     )

@@ -72,7 +72,7 @@ public class AuthenticationManager {
 
     public boolean validateToken(String token) {
         if (!enabled) return true;
-        if (expectedToken.isEmpty()) return true;
+        if (expectedToken.isEmpty()) return false;
         if (token == null) return false;
         return constantTimeCompare(expectedToken, token);
     }

@@ -128,6 +128,7 @@ class MinecraftClient:
             self._reader_thread.start()
 
     def _reader_loop(self):
+        MAX_BUFFER = 1024 * 1024  # 1MB max buffer
         buffer = b""
         while self._reader_running:
             try:
@@ -135,9 +136,12 @@ class MinecraftClient:
                 if not data:
                     break
                 buffer += data
+                if len(buffer) > MAX_BUFFER:
+                    logger.error("[CORE] Buffer overflow (%d bytes), disconnecting", len(buffer))
+                    break
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
-                    raw = line.decode("utf-8").strip()
+                    raw = line.decode("utf-8", errors="replace").strip()
                     if raw:
                         self._dispatch_incoming(raw)
             except OSError:

@@ -368,12 +368,17 @@ class CoreMock:
         custom = self._action_responses.get(action)
         if custom is not None:
             if custom.success:
-                return self._success_response(action, target, custom.message)
+                resp = self._success_response(action, target, custom.message)
             else:
                 error = custom.error or ErrorCode.EXECUTION_ERROR
-                return self._error_response(error, custom.message)
+                resp = self._error_response(error, custom.message)
+        else:
+            resp = self._success_response(action, target)
 
-        return self._success_response(action, target)
+        message_id = request.get("message_id")
+        if message_id:
+            resp["message_id"] = message_id
+        return resp
 
     def _success_response(self, action: str, target: str, message: str | None = None) -> dict[str, Any]:
         return {

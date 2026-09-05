@@ -30,7 +30,7 @@ DEFAULT_EVENT_CONFIG = {
 def get_db(db_path: str = None) -> sqlite3.Connection:
     if db_path is None:
         db_path = DEFAULT_DB_PATH
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

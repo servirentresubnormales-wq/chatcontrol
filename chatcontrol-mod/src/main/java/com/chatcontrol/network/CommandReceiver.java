@@ -34,6 +34,7 @@ public class CommandReceiver {
 
     private static final int MAX_THREADS = 4;
     private static final int MAX_QUEUE_SIZE = 50;
+    private static final int MAX_CONNECTIONS = 3;
 
     private final CopyOnWriteArrayList<Socket> connectedClients = new CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, CompletableFuture<JsonObject>> pendingLinkResponses = new ConcurrentHashMap<>();
@@ -99,6 +100,11 @@ public class CommandReceiver {
             while (running.get()) {
                 try {
                     Socket clientSocket = serverSocket.accept();
+                    if (connectedClients.size() >= MAX_CONNECTIONS) {
+                        ChatControlMod.LOGGER.warn("[ChatControl] Max connections ({}) reached, rejecting {}", MAX_CONNECTIONS, clientSocket.getRemoteSocketAddress());
+                        try { clientSocket.close(); } catch (IOException ignored) {}
+                        continue;
+                    }
                     executorService.submit(() -> handleClient(clientSocket));
                 } catch (IOException e) {
                     if (running.get()) {
@@ -116,11 +122,15 @@ public class CommandReceiver {
 
     private void handleClient(Socket clientSocket) {
         String connectionId;
+        String rateLimitKey;
         synchronized (this) {
             connectionId = "conn-" + (++connectionCounter);
         }
+        rateLimitKey = clientSocket.getRemoteSocketAddress() != null
+                ? clientSocket.getRemoteSocketAddress().toString()
+                : connectionId;
 
-        if (authManager.isEnabled() && authManager.isRateLimited(connectionId)) {
+        if (authManager.isEnabled() && authManager.isRateLimited(rateLimitKey)) {
             ChatControlMod.LOGGER.warn("[ChatControl] Rate limited connection from {}", clientSocket.getRemoteSocketAddress());
             try {
                 clientSocket.close();
@@ -136,7 +146,7 @@ public class CommandReceiver {
             ChatControlMod.LOGGER.info("[ChatControl] Client connected: {} ({})", clientSocket.getRemoteSocketAddress(), connectionId);
 
             if (authManager.isEnabled()) {
-                boolean authenticated = handleAuthentication(clientSocket, in, out, connectionId);
+                boolean authenticated = handleAuthentication(clientSocket, in, out, connectionId, rateLimitKey);
                 if (!authenticated) {
                     return;
                 }
@@ -174,7 +184,7 @@ public class CommandReceiver {
         }
     }
 
-    private boolean handleAuthentication(Socket clientSocket, BufferedReader in, PrintWriter out, String connectionId) {
+    private boolean handleAuthentication(Socket clientSocket, BufferedReader in, PrintWriter out, String connectionId, String rateLimitKey) {
         authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.AUTHENTICATING);
 
         try {
@@ -196,14 +206,14 @@ public class CommandReceiver {
             } catch (Exception e) {
                 out.println(GSON.toJson(createAuthResponse(false, "INVALID_JSON", "Invalid JSON")));
                 authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.REJECTED);
-                authManager.recordFailedAttempt(connectionId);
+                authManager.recordFailedAttempt(rateLimitKey);
                 return false;
             }
 
             if (authJson == null) {
                 out.println(GSON.toJson(createAuthResponse(false, "INVALID_JSON", "Invalid JSON")));
                 authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.REJECTED);
-                authManager.recordFailedAttempt(connectionId);
+                authManager.recordFailedAttempt(rateLimitKey);
                 return false;
             }
 
@@ -211,7 +221,7 @@ public class CommandReceiver {
             if (!"auth".equals(type)) {
                 out.println(GSON.toJson(createAuthResponse(false, "INVALID_PROTOCOL", "Expected auth message")));
                 authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.REJECTED);
-                authManager.recordFailedAttempt(connectionId);
+                authManager.recordFailedAttempt(rateLimitKey);
                 return false;
             }
 
@@ -219,7 +229,7 @@ public class CommandReceiver {
             if (protocolVersion == null || protocolVersion != ProtocolConstants.PROTOCOL_VERSION) {
                 out.println(GSON.toJson(createAuthResponse(false, "INVALID_PROTOCOL", "Unsupported protocol version")));
                 authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.REJECTED);
-                authManager.recordFailedAttempt(connectionId);
+                authManager.recordFailedAttempt(rateLimitKey);
                 return false;
             }
 
@@ -227,13 +237,13 @@ public class CommandReceiver {
             if (!authManager.validateToken(token)) {
                 out.println(GSON.toJson(createAuthResponse(false, "UNAUTHORIZED", "Invalid token")));
                 authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.REJECTED);
-                authManager.recordFailedAttempt(connectionId);
+                authManager.recordFailedAttempt(rateLimitKey);
                 ChatControlMod.LOGGER.warn("[ChatControl] Authentication failed for {}", connectionId);
                 return false;
             }
 
             authManager.setState(connectionId, AuthenticationManager.ConnectionAuthState.AUTHENTICATED);
-            authManager.clearFailedAttempts(connectionId);
+            authManager.clearFailedAttempts(rateLimitKey);
             out.println(GSON.toJson(createAuthResponse(true, null, "Authenticated")));
             ChatControlMod.LOGGER.info("[ChatControl] Client authenticated: {}", connectionId);
             return true;

@@ -26,6 +26,7 @@ class BackendClient:
         }
         try:
             resp = requests.post(url, json=payload, timeout=self._timeout)
+            resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:
             logger.error("[BACKEND] HTTP error: %s", e)
@@ -43,6 +44,13 @@ class BackendClient:
         }
         try:
             resp = requests.post(url, json=payload, timeout=self._timeout)
+            if not resp.ok:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"error": f"HTTP {resp.status_code}"}
+                data.setdefault("error", f"HTTP {resp.status_code}")
+                return data
             return resp.json()
         except requests.RequestException as e:
             logger.error("[BACKEND] Heartbeat error: %s", e)
@@ -57,6 +65,7 @@ class BackendClient:
         }
         try:
             resp = requests.post(url, json=payload, timeout=self._timeout)
+            resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:
             logger.error("[BACKEND] Revoke link error: %s", e)
